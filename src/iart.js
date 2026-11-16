@@ -11,6 +11,7 @@ const S = {
   duenen:     { n: 3, body: ['#c4a87c', '#7a6344'], head: 'mask', helm: ['#806a4a', '#3e3224'], gun: 'desert', cloak: true, eyes: 'rgba(80,150,255,1)' },
   todes:      { n: 2, body: ['#5a4636', '#231a14'], head: 'mask', helm: ['#3a2e24', '#16110d'], gun: 'crys', cloak: true, sash: '#a3302a', eyes: 'rgba(90,160,255,1)' },
   wurmreiter: { n: 1, body: ['#c7ab7f', '#7d6646'], head: 'mask', helm: ['#806a4a', '#3e3224'], gun: 'hooks', cloak: true, eyes: 'rgba(80,150,255,1)' },
+  legionaer:  { n: 2, body: ['#5a2a26', '#1e0d0b'], head: 'visor', helm: ['#3a1c19', '#120807'], gun: 'gauss', pack: 'gen', trim: '#c9a24a' },
   soeldner:   { n: 2, body: ['#a8adb5', '#4a4f57'], head: 'visor', helm: ['#c9ced6', '#5b616a'], gun: 'gauss', pack: 'gen', trim: '#d4a63a' },
   schwester:  { n: 1, body: ['#3c2d4a', '#17111d'], head: 'veil', helm: ['#251b2e', '#120c17'], gun: 'blade', cloak: true, eyes: 'rgba(210,170,255,0.95)' },
   schatten:   { n: 1, body: ['#2b3a33', '#0c120f'], head: 'hood', helm: ['#101512', '#050807'], gun: 'crys', cloak: true, eyes: 'rgba(120,255,170,0.95)' },

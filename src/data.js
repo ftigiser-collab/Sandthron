@@ -124,6 +124,8 @@ export const UNITS = {
              desc: 'Attentäter des Ossar-Syndikats: immer getarnt, Kristallklinge gegen Infanterie, erleidet nur 85 % Schaden.' },
   soeldner: { name: 'Gilden-Söldner', cat: 'drop', move: 3, mt: 'foot', sight: 2, armor: 'inf', weapon: 'gauss', cost: 0, vib: 1,
              desc: 'Elite-Infanterie der Gilde, nur per Orbital-Drop. Gaußgewehr trifft auch Thopter.' },
+  legionaer: { name: 'Kaiserlicher Legionär', cat: 'drop', move: 3, mt: 'foot', sight: 2, armor: 'inf', weapon: 'gauss', cost: 0, vib: 1, tough: 0.55,
+             desc: 'Gefürchtete Elitelegion des Kaisers, nur über die Kaiserliche Legion. Nimmt kaum Schaden, Gaußgewehr trifft auch Thopter.' },
   traeger: { name: 'Träger-Thopter', cat: 'air', move: 8, mt: 'air', sight: 2, armor: 'air', cost: 650, prereq: ['horst'], carrier: true,
              desc: 'Lufttransport für Bodeneinheiten. Im Auto-Modus holt er Ernter von weit entfernten Feldern, bringt sie zur Raffinerie und rettet sie vor Würmern.' },
 };
@@ -187,6 +189,19 @@ export const DROPS = {
   garde:  { name: 'Schildgarde-Kohorte', units: ['schild', 'schild', 'scharf'], cost: 1300, desc: 'Zwei Schildgarden und ein Scharfschütze.' },
   ernter: { name: 'Ernter-Lieferung', units: ['ernter'], cost: 1300, desc: 'Ein Ernter, abgesetzt direkt an einem Glutfeld.' },
 };
+
+// Endgame: je Fraktion ein entscheidender Schlag für sehr viel Glut, damit Partien zu einem Ende kommen
+export const ENDGAME = {
+  ossar:    { name: 'Kaiserliche Legion', ship: 'Legionsträger', cost: 8000, units: ['legionaer', 'legionaer', 'legionaer', 'legionaer', 'legionaer', 'legionaer'],
+              desc: 'Ein riesiger Legionsträger setzt sechs Trupps Kaiserlicher Legionäre ab: fast unverwundbare Elite-Infanterie.' },
+  vareth:   { name: 'Himmelsflotte', ship: 'Flottenträger', cost: 8000, units: ['adler', 'adler', 'falke', 'falke', 'bomber', 'bomber'],
+              desc: 'Ein Flottenträger öffnet seine Hangars über dem Ziel: zwei Sturmadler, zwei Kampf-Thopter und zwei Bomber.' },
+  kordan:   { name: 'Eiserne Landung', ship: 'Schwerlastlander', cost: 8000, units: ['koloss', 'koloss', 'laserpanzer', 'laserpanzer', 'panzer'],
+              desc: 'Ein Schwerlastlander setzt ein Panzerbataillon ab: zwei Kolosse, zwei Laserpanzer und ein Kampfpanzer.' },
+  sandvolk: { name: 'Ruf des Uralten', ship: null, cost: 8000, units: ['wurmreiter', 'todes', 'todes', 'duenen', 'duenen', 'duenen'],
+              desc: 'Ein Uralter Wurm bricht am Ziel hervor und verschlingt feindliche Einheiten im Sand. Auf seinem Rücken kommt ein Wüstenheer.' },
+};
+export const ENDGAME_ROUND = 8;
 
 export const ORBITAL_STRIKE = { cost: 2500, cooldown: 6, radius: 1, unitDmg: 65, bldDmg: 0.45 };
 export const SHIELD_PIERCE = ['blade', 'crys', 'artillery', 'bomb', 'siege', 'flak', 'laser', 'flame'];

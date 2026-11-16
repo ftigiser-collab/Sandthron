@@ -1,9 +1,10 @@
 // Steuerung: Eingabe, Auswahl, Menüs, Animationen, Rundenablauf
-import { UNITS, BUILDINGS, WEAPONS, TERRAIN, MOVE_COST, CARDS, DROPS, FACTIONS, ARMOR_MOD, ORBITAL_STRIKE , POIS } from './data.js';
+import { UNITS, BUILDINGS, WEAPONS, TERRAIN, MOVE_COST, CARDS, DROPS, FACTIONS, ARMOR_MOD, ORBITAL_STRIKE , POIS, ENDGAME, ENDGAME_ROUND } from './data.js';
 import { center, pixelToHex, distance, R, ring } from './hex.js';
 import { icon, cardArt } from './sprites.js';
 import { angDiff } from './util.js';
 import { aiTurn, autoHarvest, autoCarry } from './ai.js';
+import { shipKind } from './shipart.js';
 
 const $ = (s) => document.querySelector(s);
 const ARMOR_NAME = { inf: 'Infanterie', light: 'Leicht', heavy: 'Schwer', air: 'Luft', bld: 'Gebäude' };
@@ -298,6 +299,7 @@ export class Controller {
         const b = g.get(ev.b); if (!b || !g.seen(b)) continue;
         const p = this.r.posOf(b); b.rise = 0; this.fx.dust(p.x, p.y, 14, '170,150,120', 40, 8); this.tween(0.6, (k) => { b.rise = k; });
       } else if (ev.type === 'orbital') await this.animOrbital(ev);
+      else if (ev.type === 'endgame') await this.animEndgame(ev);
       else if (ev.type === 'strike') await this.animStrike(ev);
       else if (ev.type === 'card') { if (ev.owner === 0) { this.pulse('#cardsbtn'); this.refresh(); } }
       else if (ev.type === 'income') {
@@ -466,6 +468,70 @@ export class Controller {
     if (ev.owner === 0) { g.updateVision(); this.r.fogDirty = true; }
   }
 
+  // Endgame: Großraumschiff kommt über den Kartenrand, schwebt ein, setzt per Lichtstrahl ab, zieht wieder ab
+  async animEndgame(ev) {
+    const g = this.g, units = ev.units.map((id) => g.get(id)).filter(Boolean);
+    const seen = ev.owner === 0 || g.explored[g.i(ev.c, ev.r)];
+    if (!seen) return;
+    const col = g.players[ev.owner].color, tgt = center(ev.c, ev.r);
+    this.r.centerOn(tgt.x, tgt.y); await this.wait(0.3);
+    if (ev.faction === 'sandvolk') {
+      // Das Wüstenheer steigt aus dem Sand, wo der Uralte war
+      for (const u of units) u.hidden = true;
+      $('#app').classList.add('quake');
+      for (const u of units) { const p = center(u.c, u.r); this.fx.sandBurst(p.x, p.y, 26, 26, 3); }
+      this.fx.shake = 10;
+      await this.wait(0.5);
+      for (const u of units) { u.hidden = false; this.hitFlash(u); }
+      $('#app').classList.remove('quake');
+      this.r.float(tgt.x, tgt.y - 60, 'Das Wüstenheer erhebt sich!', '#ffd28a', true);
+      await this.wait(0.8);
+    } else {
+      for (const u of units) u.hidden = true;
+      const kind = shipKind(ev.faction), dir = ev.owner === 0 ? -1 : 1;
+      // 1. Der Gilden-Großtransporter zieht hoch oben vorbei und gibt die Landeschiffe frei
+      const ring = { kind: 'ring', x: tgt.x + dir * 1400, y: tgt.y + 40, z: 170, r: 480, rot: 0.15, alpha: 0.95 };
+      this.r.ships.push(ring);
+      await this.tween(2.6, (k) => { const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; ring.x = tgt.x + dir * 1400 - dir * 2800 * e; this.fx.shake = Math.max(this.fx.shake, 1.5); });
+      this.r.ships = this.r.ships.filter((x) => x !== ring);
+      // 2. Landeschiffe: Legion kommt in drei Eiern, die anderen in einem großen Schiff
+      const groups = kind === 'egg' ? [units.slice(0, 2), units.slice(2, 4), units.slice(4)] : [units];
+      const ships = groups.filter((g2) => g2.length).map((g2, i) => {
+        const ps = g2.map((u) => center(u.c, u.r)), cx = ps.reduce((a, p) => a + p.x, 0) / ps.length, cy = ps.reduce((a, p) => a + p.y, 0) / ps.length;
+        const ea = i * 2.094 - 1.57, tx = kind === 'egg' ? tgt.x + Math.cos(ea) * 95 : cx, ty = kind === 'egg' ? tgt.y + Math.sin(ea) * 70 : cy;
+        const sh = { kind, color: col, x: tx + dir * (700 + i * 160), y: ty - 300 - i * 60, z: 360, scale: kind === 'egg' ? 0.7 : 1.6, alpha: 1, thrust: 1, beams: [], tx, ty, group: g2 };
+        sh.sx = sh.x; sh.sy = sh.y; sh.rot = kind === 'egg' ? 0 : Math.atan2(cy - sh.y, cx - sh.x);
+        return sh;
+      });
+      this.r.ships.push(...ships);
+      await this.tween(2.2, (k) => {
+        const e = 1 - Math.pow(1 - k, 3);
+        for (const sh of ships) { sh.x = sh.sx + (sh.tx - sh.sx) * e; sh.y = sh.sy + (sh.ty - sh.sy) * e; sh.z = 360 - (kind === 'egg' ? 300 : 270) * e; }
+        this.fx.shake = Math.max(this.fx.shake, 2 + 4 * k);
+        for (const sh of ships) if (Math.random() < 0.35) this.fx.dust(sh.x + (Math.random() - 0.5) * 200, sh.y + (Math.random() - 0.5) * 120, 1, '205,165,112', 40, 9);
+      });
+      $('#app').classList.add('quake');
+      for (const sh of ships) {
+        sh.beams = sh.group.map((u) => { const p = center(u.c, u.r); return { x: p.x, y: p.y, a: 0 }; });
+        if (kind === 'egg') { this.fx.dust(sh.x, sh.y, 30, '205,165,112', 70, 10); this.fx.ring(sh.x, sh.y, 30, '230,200,160', 0.6); }
+      }
+      for (const sh of ships) for (let i = 0; i < sh.group.length; i++) {
+        const b = sh.beams[i];
+        await this.tween(0.3, (k) => { b.a = k; });
+        sh.group[i].hidden = false; this.hitFlash(sh.group[i]); this.fx.dust(b.x, b.y, 12, '205,165,112', 40, 8); this.fx.ring(b.x, b.y, 12, '255,220,170', 0.5);
+      }
+      await this.wait(0.5);
+      await this.tween(0.4, (k) => { for (const sh of ships) for (const b of sh.beams) b.a = 1 - k; });
+      $('#app').classList.remove('quake');
+      // 3. Abflug
+      for (const sh of ships) { sh.ex = sh.x; sh.ey = sh.y; sh.ez = sh.z; }
+      await this.tween(1.6, (k) => { const e = k * k; for (const sh of ships) { sh.z = sh.ez + 520 * e; sh.x = sh.ex - dir * 300 * e; sh.y = sh.ey - 200 * e; sh.thrust = 1 + k; sh.alpha = 1 - Math.max(0, k - 0.6) * 2.5; } });
+      this.r.ships = this.r.ships.filter((s2) => !ships.includes(s2));
+      this.r.float(tgt.x, tgt.y - 60, `${ENDGAME[ev.faction].name} ist gelandet!`, ev.owner === 0 ? '#ffd28a' : '#ff7050', true);
+    }
+    if (ev.owner === 0) { g.updateVision(); this.r.fogDirty = true; }
+  }
+
   async doVoice(u, t) {
     const g = this.g;
     const ev = g.voice(u, t);
@@ -629,6 +695,20 @@ export class Controller {
     if (Math.hypot(x - home.x, y - home.y) > 2) await this.tween(0.45, (k) => { const e = k * k * (3 - 2 * k); car.vis = { x: x + (home.x - x) * e, y: y + (home.y - y) * e }; });
     car.vis = null; car.z = undefined;
   }
+  // Landen / Starten: absinken mit Staub und Flügel einklappen bzw. hochziehen
+  async animLand(u, down) {
+    const g = this.g, p = center(u.c, u.r), fx = this.fx;
+    if (down) {
+      await this.tween(0.8, (k) => { u.z = 26 - 23 * (k * k * (3 - 2 * k)); if (Math.random() < 0.8) fx.dust(p.x + (Math.random() - 0.5) * 34, p.y + (Math.random() - 0.5) * 24, 1, '205,165,112', 20 + k * 20, 7); });
+      g.land(u); u.z = undefined; fx.dust(p.x, p.y, 14, '205,165,112', 36, 8);
+    } else {
+      g.takeoff(u); u.z = 3;
+      await this.tween(0.8, (k) => { u.z = 3 + 23 * (k * k * (3 - 2 * k)); if (Math.random() < 0.8 * (1 - k)) fx.dust(p.x + (Math.random() - 0.5) * 34, p.y + (Math.random() - 0.5) * 24, 1, '205,165,112', 30, 7); });
+      u.z = undefined;
+    }
+    if (u.owner === 0) { g.updateVision(); this.r.fogDirty = true; }
+  }
+
   async animPickup(car, t) {
     const g = this.g;
     if (car.owner === 0 || g.seen(car)) {
@@ -720,7 +800,7 @@ export class Controller {
       }
       this.mode = 'moved'; this.select(this.sel); return;
     }
-    if (['card', 'orbital', 'voice', 'thump', 'capture', 'repair', 'infiltrate', 'callworm', 'strike'].includes(this.mode)) {
+    if (['card', 'orbital', 'voice', 'thump', 'capture', 'repair', 'infiltrate', 'callworm', 'strike', 'endgame'].includes(this.mode)) {
       const hit = this.r.hl.target.some(([tc, tr]) => tc === c && tr === r);
       const m = this.mode; this.clearHL(); this.mode = 'idle';
       if (!hit) { this.deselect(); return; }
@@ -731,6 +811,7 @@ export class Controller {
       else if (m === 'capture' || m === 'repair' || m === 'infiltrate') { const b = g.buildingAt(c, r); if (b) await this.doSpecial(m, this.sel, b); }
       else if (m === 'callworm') await this.doWormCall(this.sel, c, r);
       else if (m === 'strike') { if (g.orderStrike(0, c, r)) { const p = center(c, r); this.fx.ring(p.x, p.y, 20, '255,90,70', 0.7); } }
+      else if (m === 'endgame') { if (g.orderEndgame(0, c, r)) { const p = center(c, r); this.fx.ring(p.x, p.y, 40, '255,210,120', 0.8); this.fx.flash(p.x, p.y, 60, '255,220,150', 0.3); } }
       else if (m === 'voice') { const t = g.voiceTargets(this.sel).find((t) => t.c === c && t.r === r); if (t) await this.doVoice(this.sel, t); }
       this.busy = false; this.deselect(); this.refresh(); return;
     }
@@ -784,7 +865,7 @@ export class Controller {
     const targets = g.canFire(u) ? g.targetsFrom(u, u.c, u.r) : [];
     const carrierAct = u.def.carrier && !u.acted;
     const special = !u.acted && ((u.def.capture && (g.adjBuildings(u, true).length || g.adjBuildings(u, false).some((b) => b.hp < b.maxHp))) || (u.def.infiltrate && g.adjBuildings(u, true).length) || g.canCallWorm(u) || g.canThump(u) || g.canVoice(u));
-    if (!targets.length && !carrierAct && !special) { u.acted = true; this.deselect(); this.refresh(); return; }
+    if (!targets.length && !carrierAct && !special && !g.canLand(u)) { u.acted = true; this.deselect(); this.refresh(); return; }
     this.mode = 'moved';
     this.select(u);
   }
@@ -1147,6 +1228,8 @@ export class Controller {
           if (e.carrying) btns.push('<button data-a="drop">Absetzen</button>');
           else if (g.units.some((t) => g.canPickup(e, t))) btns.push('<button data-a="pickup">Aufnehmen</button>');
         }
+        if (g.canLand(e)) btns.push('<button data-a="land">⬇ Landen</button>');
+        if (e.landed) btns.push(g.canTakeoff(e) ? '<button data-a="takeoff" class="primary">⬆ Starten</button>' : '<button disabled>Gelandet — nächste Runde startbereit</button>');
         if (!e.acted) btns.push('<button data-a="wait">Warten</button>');
         html += `<div class="p-actions">${btns.join('')}</div>`;
         const state = e.acted ? 'Hat gehandelt' : e.moved ? (g.canFire(e) ? 'Bewegt — kann noch angreifen' : 'Bewegt') : 'Bereit';
@@ -1244,7 +1327,14 @@ export class Controller {
       }).join('');
       const sc = p.strikeCd || 0, sok = g.canStrike(0);
       const strike = `<div class="p-title">Orbitalbombardement</div><button class="drop ${sok ? '' : 'locked'}" data-a="strike"><b>Bombardement anfordern</b><span>Trifft das Zielfeld und alle Nachbarn zu Beginn eurer nächsten Runde: ${ORBITAL_STRIKE.unitDmg} Schaden an Einheiten, ${ORBITAL_STRIKE.bldDmg * 100} % an Gebäuden. Der Feind sieht die Zielmarkierung.${sc ? ` Bereit in ${sc} ${sc === 1 ? 'Runde' : 'Runden'}.` : ''}</span><em>◈ ${ORBITAL_STRIKE.cost}</em></button>`;
-      return `<div class="p-title">${title}</div><div class="drops">${html}</div><div class="drops">${strike}</div>`;
+      const eg = ENDGAME[p.faction];
+      let endg = '';
+      if (eg) {
+        const eok = g.canEndgame(0);
+        const why = p.endgameUsed ? 'Bereits eingesetzt (einmal pro Partie).' : g.round < ENDGAME_ROUND ? `Verfügbar ab Runde ${ENDGAME_ROUND}.` : p.credits < eg.cost ? 'Zu wenig Credits.' : '';
+        endg = `<div class="p-title">Entscheidungsschlag</div><button class="drop endgame ${eok ? '' : 'locked'}" data-a="endgame"><b>${eg.name}</b><span>${eg.desc} Landet zu Beginn eurer nächsten Runde, mindestens 3 Felder von feindlichen Gebäuden entfernt. Der Feind sieht die Ankunftszone.${why ? ' ' + why : ''}</span><em>◈ ${eg.cost}</em></button>`;
+      }
+      return `<div class="p-title">${title}</div><div class="drops">${html}</div><div class="drops">${strike}</div><div class="drops">${endg}</div>`;
     } else if (b.type === 'konvent' && !items.length) {
       title = 'Ausbilden (fertig nächste Runde)';
     } else return '';
@@ -1286,6 +1376,8 @@ export class Controller {
       return;
     }
     if (a === 'wait') { e.acted = true; e.moved = true; this.deselect(); this.refresh(); return; }
+    if (a === 'land') { if (g.canLand(e)) { this.busy = true; this.animLand(e, true).then(() => { this.busy = false; this.deselect(); this.refresh(); }); } return; }
+    if (a === 'takeoff') { if (g.canTakeoff(e)) { this.busy = true; this.animLand(e, false).then(() => { this.busy = false; this.select(e); this.refresh(); }); } return; }
     if (a === 'auto') { e.auto = !e.auto; this.showPanel(e); return; }
     if (a === 'build') { this.infoSel = null; this.startBuild(t, false); return; }
     if (a === 'prod') { this.infoSel = null; if (g.produce(e, t)) { this.flash(`${UNITS[t].name} in Auftrag gegeben`); this.refresh(); this.showPanel(e); } else this.flash('Produktion nicht möglich'); return; }
@@ -1293,6 +1385,10 @@ export class Controller {
     if (a === 'capture' || a === 'infiltrate') { this.mode = a; this.clearHL(); this.r.hl.sel = e; this.r.hl.target = g.adjBuildings(e, true).map((b) => [b.c, b.r]); this.flash('Feindliches Gebäude antippen'); return; }
     if (a === 'repair') { this.mode = 'repair'; this.clearHL(); this.r.hl.sel = e; this.r.hl.target = g.adjBuildings(e, false).filter((b) => b.hp < b.maxHp).map((b) => [b.c, b.r]); this.flash('Eigenes Gebäude antippen'); return; }
     if (a === 'callworm') { this.mode = 'callworm'; this.clearHL(); this.r.hl.sel = e; this.r.hl.target = g.callWormHexes(e); this.flash('Sandfeld für den Wurm antippen (bis 5 Felder)'); return; }
+    if (a === 'endgame') {
+      if (!g.canEndgame(0)) { this.flash('Entscheidungsschlag noch nicht verfügbar'); return; }
+      this.clearHL(); this.mode = 'endgame'; this.r.hl.target = g.endgameHexes(0); $('#panel').classList.remove('show'); this.flash(`${ENDGAME[g.players[0].faction].name}: Zielfeld antippen`); return;
+    }
     if (a === 'strike') {
       if (!g.canStrike(0)) { this.flash(g.players[0].credits < ORBITAL_STRIKE.cost ? 'Zu wenig Credits' : 'Bombardement noch nicht bereit'); return; }
       this.clearHL(); this.mode = 'strike'; this.r.hl.target = g.strikeHexes(0); $('#panel').classList.remove('show'); this.flash('Zielfeld für das Bombardement antippen (trifft 7 Felder)'); return;

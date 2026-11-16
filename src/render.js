@@ -5,6 +5,7 @@ import { WORM_SIZES } from './data.js';
 import { clamp, rgba, Noise, smoothstep } from './util.js';
 import { tintedBlob } from './fx.js';
 import { drawPoi } from './poiart.js';
+import { drawMothership } from './shipart.js';
 
 const FILTER_OK = (() => { try { const c = document.createElement('canvas').getContext('2d'); c.filter = 'blur(2px)'; return c.filter === 'blur(2px)'; } catch { return false; } })();
 
@@ -16,6 +17,7 @@ export class Renderer {
     this.floaters = [];
     this.hl = { move: null, attack: [], build: [], drop: [], target: [], path: null, sel: null, hover: null, forecast: null };
     this.pods = [];
+    this.ships = [];
     this.t = 0;
     this.fogDirty = true;
     this.spiceSprites = this.makeSpiceSprites();
@@ -216,6 +218,15 @@ export class Renderer {
       ctx.setLineDash([]);
       ctx.strokeStyle = 'rgba(255,80,60,0.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(p.x - 14, p.y); ctx.lineTo(p.x + 14, p.y); ctx.moveTo(p.x, p.y - 14); ctx.lineTo(p.x, p.y + 14); ctx.stroke();
     }
+    // Angekündigter Endgame-Schlag: großer Zielkreis, für beide Seiten sichtbar
+    for (const pl of g.players) {
+      const pe = pl.pendingEndgame; if (!pe || !g.explored[g.i(pe.c, pe.r)]) continue;
+      const p = center(pe.c, pe.r), k = (this.t * 0.8) % 1, col = pl.id === 0 ? '255,210,120' : '255,70,50';
+      ctx.strokeStyle = `rgba(${col},${0.8 - k * 0.6})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(p.x, p.y, 40 + k * 90, 0, 6.28); ctx.stroke();
+      ctx.setLineDash([10, 8]); ctx.lineDashOffset = -this.t * 40; ctx.lineWidth = 2; ctx.strokeStyle = `rgba(${col},0.85)`;
+      ctx.beginPath(); ctx.arc(p.x, p.y, R * 2.6, 0, 6.28); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = `rgba(${col},0.9)`; ctx.font = 'bold 13px system-ui'; ctx.textAlign = 'center'; ctx.fillText(pl.id === 0 ? 'EURE ANKUNFT' : 'FEINDLICHE ANKUNFT', p.x, p.y - R * 2.6 - 8);
+    }
     for (const wc of g.wormCalls) if (wc.owner === 0) { const p = center(wc.c, wc.r); drawThumper(ctx, p.x, p.y, this.t * 1.6); }
     for (const d of g.players[0].pendingDrops) {
       const p = center(d.c, d.r), k = (this.t * 1.5) % 1;
@@ -292,6 +303,7 @@ export class Renderer {
     }
     for (const u of air) this.drawUnitFull(ctx, u);
     for (const pd of this.pods) drawPod(ctx, pd.x, pd.y, pd.h, pd.open, pd.color, this.t);
+    for (const sh of this.ships) drawMothership(ctx, sh, this.t);
     this.drawProjectiles(ctx);
     this.fx.draw(ctx, 'add', view);
     this.drawClouds(ctx, dt);
@@ -328,7 +340,7 @@ export class Renderer {
     const idleTurret = turretUnit && !(u.aimUntil > this.t) ? Math.sin(this.t * 0.45 + u.id * 1.7) * 0.4 : (u.turretRel || 0);
     const air = u.def.mt === 'air';
     const z = air ? (u.z ?? 26) + (u.crashing ? 0 : Math.sin(this.t * 2.2 + u.id) * 1.8) : 0;
-    const o = { ring: !u.crashing && !u.sink, scale: u.sink ? 1.62 * (1 - u.sink * 0.85) : undefined, bank: u.bank || 0, moving: !!u.anim, turret: idleTurret, recoil: u.recoil || 0, harvesting: u.harvestAnim > 0, z };
+    const o = { ring: !u.crashing && !u.sink, scale: u.sink ? 1.62 * (1 - u.sink * 0.85) : undefined, bank: u.bank || 0, moving: !!u.anim, turret: idleTurret, recoil: u.recoil || 0, harvesting: u.harvestAnim > 0, z, landed: !!u.landed };
     if (u.def.carrier && u.carrying) {
       const c = g.get(u.carrying);
       if (c) o.carry = () => drawUnit(ctx, c, 0, 0, col, this.t, { turret: 0 });

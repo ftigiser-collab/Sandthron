@@ -283,20 +283,22 @@ const THOPTER = {
   } },
 };
 
-// eckiger Libellenflügel: wurzelt bei (0,0), zeigt in Richtung +y*side, f = Verkürzung durch den Flügelschlag
-function angWing(c, side, len, chord, f, sweep, alpha) {
-  const L = len * f;
+// Flügelblatt (Filmanlehnung: lang, schmal, kantig, aus Metall), wurzelt bei (0,0), zeigt nach +y*side
+// f = scheinbare Länge durch den Schlag (Verkürzung), ghost = Schlieren der Bewegungsunschärfe
+function angWing(c, side, len, chord, f, sweep, alpha, ghost = false) {
+  const L = len * f, w = chord * 0.9;
   c.save(); c.rotate(side * sweep);
-  const P = [[-chord * 0.42, 0], [-chord * 0.5, side * L * 0.82], [-chord * 0.18, side * L], [chord * 0.32, side * L * 0.9], [chord * 0.45, side * L * 0.2], [chord * 0.4, 0]];
-  const g = c.createLinearGradient(0, 0, 0, side * L);
-  g.addColorStop(0, `rgba(214,224,230,${0.7 * alpha})`); g.addColorStop(0.6, `rgba(190,204,212,${0.42 * alpha})`); g.addColorStop(1, `rgba(170,186,196,${0.25 * alpha})`);
-  c.fillStyle = g; c.beginPath(); P.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); c.fill();
-  // Rahmen: kräftige Vorderkante, Längsholm, Querrippen
-  c.strokeStyle = `rgba(52,58,64,${0.6 * alpha})`; c.lineWidth = 0.55;
-  c.beginPath(); c.moveTo(P[0][0], P[0][1]); c.lineTo(P[1][0], P[1][1]); c.lineTo(P[2][0], P[2][1]); c.stroke();
-  c.lineWidth = 0.3; c.strokeStyle = `rgba(70,76,82,${0.3 * alpha})`;
-  c.beginPath(); c.moveTo(0, 0); c.lineTo(-chord * 0.05, side * L * 0.94);
-  for (let k = 1; k <= 2; k++) { const fy = k / 3; c.moveTo(-chord * (0.42 + 0.08 * fy), side * L * fy * 0.82); c.lineTo(chord * (0.4 - 0.05 * fy), side * L * fy * 0.86); }
+  const P = [[-w * 0.5, 0], [-w * 0.62, side * L * 0.15], [-w * 0.5, side * L * 0.96], [-w * 0.1, side * L], [w * 0.45, side * L * 0.93], [w * 0.55, side * L * 0.12], [w * 0.4, 0]];
+  const path = () => { c.beginPath(); P.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); };
+  if (ghost) { c.fillStyle = `rgba(150,146,136,${0.16 * alpha})`; path(); c.fill(); c.restore(); return; }
+  const g = c.createLinearGradient(-w, 0, w, 0);
+  g.addColorStop(0, `rgba(196,190,176,${alpha})`); g.addColorStop(0.5, `rgba(150,145,134,${alpha})`); g.addColorStop(1, `rgba(92,88,80,${alpha})`);
+  c.fillStyle = g; path(); c.fill();
+  // Kante, Mittelholm, Segmentfugen
+  c.strokeStyle = `rgba(40,38,34,${0.75 * alpha})`; c.lineWidth = 0.45; path(); c.stroke();
+  c.strokeStyle = `rgba(230,224,210,${0.55 * alpha})`; c.lineWidth = 0.35; c.beginPath(); c.moveTo(-w * 0.15, side * 1.5); c.lineTo(-w * 0.15, side * L * 0.94); c.stroke();
+  c.strokeStyle = `rgba(40,38,34,${0.45 * alpha})`; c.beginPath();
+  for (let k = 1; k <= 3; k++) { const y = side * L * k / 4; c.moveTo(-w * 0.55, y); c.lineTo(w * 0.5, y); }
   c.stroke();
   c.restore();
 }
@@ -307,15 +309,22 @@ function thopterArt(ctx, u, color, t, o, kind) {
   const z = o.z ?? 26, sc = def.scale, bank = o.bank || 0;
   // Viele kleine Flügel: je Wurzel ein Fächer aus drei schmalen Flügeln, jeder mit eigenem Takt
   const wl = wingList(def);
-  const fl = (w, side) => 0.25 + 0.75 * Math.abs(Math.cos(t * def.rate * w.rate + u.id + w.off + (side > 0 ? 0.9 : 0)));
+  const fl = (w, side) => o.landed ? 0.92 : 0.25 + 0.75 * Math.abs(Math.cos(t * def.rate * w.rate + u.id + w.off + (side > 0 ? 0.9 : 0)));
   const drawWings = (alpha) => {
     for (const side of [-1, 1]) {
       const lean = 1 - side * bank * 0.3;
-      for (const w of wl) c2(ctx, () => { ctx.translate(w.x, side * w.y); angWing(ctx, side, w.len * lean, w.chord, fl(w, side), w.sw, alpha); });
+      for (const w of wl) {
+        const f = fl(w, side);
+        // Schlieren: das Blatt an zwei früheren Schlagpositionen, sehr blass
+        if (!o.landed) for (const d of [0.22, 0.44]) c2(ctx, () => { ctx.translate(w.x, side * w.y); angWing(ctx, side, w.len * lean, w.chord, Math.min(1, f + d * (f < 0.6 ? 1 : -1)), w.sw + side * d * 0.25, alpha, true); });
+        c2(ctx, () => { ctx.translate(w.x, side * w.y); angWing(ctx, side, w.len * lean, w.chord, f, o.landed ? w.sw + 0.95 : w.sw, alpha); });
+      }
+      // Flügelnaben
+      for (const [x, rootY] of def.wings) { ctx.fillStyle = '#3a3630'; ctx.beginPath(); ctx.arc(x, side * rootY, 1.4, 0, 6.28); ctx.fill(); ctx.fillStyle = '#8a8478'; ctx.beginPath(); ctx.arc(x - 0.3, side * rootY - 0.3, 0.7, 0, 6.28); ctx.fill(); }
       // Bewegungsunschärfe als Fächer je Wurzel
-      for (const [x, rootY, len, , sw0] of def.wings) {
+      if (!o.landed) for (const [x, rootY, len, , sw0] of def.wings) {
         const sw = sw0 ?? 0.15;
-        ctx.save(); ctx.translate(x, side * rootY); ctx.fillStyle = `rgba(200,215,225,${0.08 * alpha})`;
+        ctx.save(); ctx.translate(x, side * rootY); ctx.fillStyle = `rgba(170,164,150,${0.07 * alpha})`;
         ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, len * 0.8 * lean, side > 0 ? 1.0 - sw : -2.15 + sw, side > 0 ? 2.15 - sw : -1.0 + sw); ctx.closePath(); ctx.fill(); ctx.restore();
       }
     }
@@ -347,8 +356,8 @@ function wingList(def) {
   const out = [];
   def.wings.forEach(([x, rootY, len, chord, sw0], si) => {
     const base = sw0 ?? (si ? 0.42 : -0.1);
-    [[-2.4, -0.4, 0.86], [0, 0, 0.92], [2.4, 0.4, 0.82]].forEach(([dx, da, lf], j) => {
-      out.push({ x: x + dx, y: rootY, len: len * lf, chord: chord * 0.72, sw: base + da, rate: 1 + 0.13 * j + 0.07 * si, off: si * 1.3 + j * 2.1 });
+    [[-0.9, -0.14, 1.0], [0.9, 0.14, 0.95]].forEach(([dx, da, lf], j) => {
+      out.push({ x: x + dx, y: rootY, len: len * lf, chord: chord * 0.8, sw: base + da, rate: 1 + 0.13 * j + 0.07 * si, off: si * 1.3 + j * 2.1 });
     });
   });
   WL.set(def, out);

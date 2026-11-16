@@ -1,6 +1,7 @@
 // Spielregeln und Zustand (rundenbasiert)
-import { UNITS, BUILDINGS, WEAPONS, ARMOR_MOD, TERRAIN, MOVE_COST, FACTIONS, START_CREDITS, DROPS, CARDS, WORM_SIZES, ORBITAL_STRIKE, SHIELD_PIERCE, POIS } from './data.js';
+import { UNITS, BUILDINGS, WEAPONS, ARMOR_MOD, TERRAIN, MOVE_COST, FACTIONS, START_CREDITS, DROPS, CARDS, WORM_SIZES, ORBITAL_STRIKE, SHIELD_PIERCE, POIS, ENDGAME, ENDGAME_ROUND } from './data.js';
 import { neighbors, distance, ring, center } from './hex.js';
+const LANDED = {};
 const ang = (c1, r1, c2, r2) => { const a = center(c1, r1), b = center(c2, r2); return Math.atan2(b.y - a.y, b.x - a.x); };
 import { mulberry32 } from './util.js';
 
@@ -146,6 +147,7 @@ export class Game {
     const res = new Map();
     const key = (c, r) => r * this.W + c;
     res.set(key(u.c, u.r), { c: u.c, r: u.r, cost: 0, prev: null });
+    if (u.landed) return res;
     const open = [[u.c, u.r, 0]];
     while (open.length) {
       open.sort((a, b) => a[2] - b[2]);
@@ -235,11 +237,21 @@ export class Game {
   // ---------- Kampf ----------
   weapon(e) { return WEAPONS[e.def.weapon] || null; }
   isAir(e) { return e.isUnit && e.def.mt === 'air'; }
+  // ---------- Thopter landen / starten ----------
+  isThopter(u) { return u.isUnit && UNITS[u.type].mt === 'air'; }
+  landedDef(type) { LANDED[type] = LANDED[type] || { ...UNITS[type], mt: 'track', landedForm: true }; return LANDED[type]; }
+  canLand(u) {
+    return this.isThopter(u) && !u.landed && !u.didLand && !u.carried && !u.carrying && u.owner === this.current && !this.inStorm(u.c, u.r)
+      && !this.unitAt(u.c, u.r, false) && !this.buildingAt(u.c, u.r) && this.cost('track', u.c, u.r) !== Infinity;
+  }
+  land(u) { u.landed = true; u.didLand = true; u.def = this.landedDef(u.type); u.moved = true; u.acted = true; return { type: 'land', u: u.id }; }
+  canTakeoff(u) { return !!u.landed && !u.acted && u.owner === this.current; }
+  takeoff(u) { u.landed = false; u.def = UNITS[u.type]; u.didLand = true; return { type: 'takeoff', u: u.id }; }
   canHit(w, t) { return !!w && (this.isAir(t) ? w.air : w.ground); }
   inRange(w, c1, r1, c2, r2) { const d = distance(c1, r1, c2, r2); return d >= w.range[0] && d <= w.range[1]; }
 
   canFire(u) {
-    const w = this.weapon(u); if (!w || u.acted || u.carried) return false;
+    const w = this.weapon(u); if (!w || u.acted || u.carried || u.landed) return false;
     if (w.noMoveFire && u.moved) return false;
     if (w.ammo && u.ammo <= 0) return false;
     if (u.isBuilding && (u.turnsLeft > 0 || this.players[u.owner].low || u.sabotaged > 0)) return false;
@@ -475,6 +487,7 @@ export class Game {
     if (p.dropCd > 0) p.dropCd--;
     if (p.strikeCd > 0) p.strikeCd--;
     ev.push(...this.resolveStrikes(owner));
+    ev.push(...this.resolveEndgame(owner));
     for (const d of p.pendingDrops) {
       const ids = [];
       for (const t of DROPS[d.id].units) { const u = this.spawnNear(owner, t, d.c, d.r); if (u) { u.dropped = true; ids.push(u.id); } }
@@ -495,6 +508,11 @@ export class Game {
       if (u.wormCd > 0) u.wormCd--;
       if (u.shield > 0) u.shield--;
       if (u.stunned > 0) { u.stunned--; u.moved = true; u.acted = true; u.wasStunned = true; } else u.wasStunned = false;
+      u.didLand = false;
+      if (u.landed) {
+        if (u.hp < 100) { const h = Math.min(100 - u.hp, 20); u.hp += h; ev.push({ type: 'heal', u: u.id, amount: h }); }
+        if (u.def.ammo && u.ammo < u.def.ammo) { u.ammo = u.def.ammo; ev.push({ type: 'rearm', u: u.id }); }
+      }
       if (u.def.ammo && u.ammo < u.def.ammo) {
         const h = this.buildings.find((b) => !b.dead && b.owner === owner && b.type === 'horst' && b.turnsLeft <= 0 && distance(b.c, b.r, u.c, u.r) <= 1);
         if (h) { u.ammo = u.def.ammo; ev.push({ type: 'rearm', u: u.id }); }
@@ -608,6 +626,48 @@ export class Game {
     u.wormCd = 4; u.acted = true; u.moved = true;
     if (u.owner === 0) this.say('Der Wurmreiter schlägt den Ruf — in der nächsten Wurmphase kommt ein Großer Wurm', 'good');
     return { type: 'wormcall', u: u.id, c, r };
+  }
+
+  // ---------- Endgame-Schlag (einmal pro Partie) ----------
+  endgameDef(owner) { return ENDGAME[this.players[owner].faction]; }
+  canEndgame(owner) {
+    const p = this.players[owner], d = this.endgameDef(owner);
+    return !!d && this.hasActive(owner, 'kontor') && !p.low && !p.endgameUsed && this.round >= ENDGAME_ROUND && p.credits >= d.cost && this.current === owner;
+  }
+  endgameHexes(owner) {
+    return this.orbitalHexes(owner).filter(([c, r]) => !this.buildings.some((b) => !b.dead && b.owner !== owner && distance(b.c, b.r, c, r) <= 2));
+  }
+  orderEndgame(owner, c, r) {
+    if (!this.canEndgame(owner) || !this.endgameHexes(owner).some(([a, b]) => a === c && b === r)) return false;
+    const p = this.players[owner], d = this.endgameDef(owner);
+    p.credits -= d.cost; p.endgameUsed = true; p.pendingEndgame = { c, r };
+    this.say(owner === 0 ? `${d.name} angefordert — Ankunft zu Beginn eurer nächsten Runde` : `Warnung: Der Feind hat die ${d.name} gerufen! Ankunft nächste Runde`, owner === 0 ? 'good' : 'bad');
+    return true;
+  }
+  resolveEndgame(owner) {
+    const p = this.players[owner], pe = p.pendingEndgame; if (!pe) return [];
+    p.pendingEndgame = null;
+    const d = this.endgameDef(owner), ev = [];
+    if (this.players[owner].faction === 'sandvolk') {
+      // Der Uralte bricht am nächsten Sandfeld hervor und frisst nur Feinde
+      let best = null, bd = 99;
+      for (const [c, r] of [[pe.c, pe.r], ...ring(pe.c, pe.r, 3, this.W, this.H)]) if (this.isSand(c, r)) { const dd = distance(c, r, pe.c, pe.r); if (dd < bd) { bd = dd; best = [c, r]; } }
+      if (best) {
+        const w = this.spawnWorm(best[0], best[1]);
+        if (w) {
+          w.size = 3; w.sated = 4;
+          const hexes = [[best[0], best[1]], ...neighbors(best[0], best[1], this.W, this.H).filter(([c, r]) => this.isSand(c, r))];
+          const eaten = this.units.filter((u) => !u.dead && !u.carried && u.owner !== owner && u.def.mt !== 'air' && hexes.some(([c, r]) => c === u.c && r === u.r));
+          for (const u of eaten) { this.kill(u, { owner }); this.players[u.owner].stats.eaten++; }
+          ev.push({ type: 'worm', id: w.id, path: [{ c: best[0], r: best[1] }], eatMany: eaten.map((u) => u.id), eatHexes: hexes, called: true });
+        }
+      }
+    }
+    const ids = [];
+    for (const t of d.units) { const u = this.spawnNear(owner, t, pe.c, pe.r); if (u) { u.dropped = true; ids.push(u.id); } }
+    ev.push({ type: 'endgame', owner, c: pe.c, r: pe.r, units: ids, faction: this.players[owner].faction });
+    this.say(`${d.name} ist eingetroffen!`, owner === 0 ? 'good' : 'bad');
+    return ev;
   }
 
   // ---------- Orbitalbombardement ----------
@@ -1009,7 +1069,7 @@ export class Game {
     const g = new Game(map, { diff });
     g.diffName = data.diffName; g.aiPassive = data.aiPassive; g.round = data.round; g.current = 0; g.aiMode = data.aiMode; g.revealRound = data.revealRound;
     g.players = data.players.map((p) => ({ ...p, perk: FACTIONS[p.faction].perk || {} }));
-    g.units = data.units.map((u) => ({ ...u, def: UNITS[u.type] }));
+    g.units = data.units.map((u) => ({ ...u, def: u.landed ? g.landedDef(u.type) : UNITS[u.type] }));
     g.buildings = data.buildings.map((b) => ({ ...b, def: BUILDINGS[b.type], rise: 1 }));
     if (data.pois) g.pois.forEach((p, k) => { p.owner = data.pois[k] ?? -1; });
     g.worms = data.worms; g.storm = data.storm; g.thumpers = data.thumpers || []; g.strikes = data.strikes || []; g.wormCalls = data.wormCalls || [];

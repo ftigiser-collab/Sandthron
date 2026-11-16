@@ -1,9 +1,9 @@
 // Gegner-KI und Auto-Ernter (gemeinsam genutzt)
-import { UNITS, BUILDINGS, CARDS, DROPS, ORBITAL_STRIKE } from './data.js';
+import { UNITS, BUILDINGS, CARDS, DROPS, ORBITAL_STRIKE, ENDGAME_ROUND } from './data.js';
 import { ring } from './hex.js';
 import { distance, neighbors } from './hex.js';
 
-const PLAN = ['windfalle', 'raffinerie', 'kaserne', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'horst', 'ausguck', 'windfalle', 'konvent', 'turm', 'windfalle', 'kontor', 'felsenhort', 'flak', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'turm', 'flak', 'windfalle'];
+const PLAN = ['windfalle', 'raffinerie', 'kaserne', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'horst', 'ausguck', 'windfalle', 'kontor', 'konvent', 'turm', 'windfalle', 'felsenhort', 'flak', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'turm', 'flak', 'windfalle'];
 
 function value(g, e) {
   if (e.isBuilding) return e.type === 'bauhof' ? 2500 : e.def.weapon ? 900 : e.def.cost * 0.6;
@@ -132,8 +132,13 @@ export async function autoCarry(g, car, act) {
 // ---------- KI-Zug ----------
 export async function aiTurn(g, act, owner = 1) {
   const enemy = 1 - owner;
-  aiBuild(g, owner);
-  aiProduce(g, owner);
+  aiEndgame(g, owner);
+  // Für den Entscheidungsschlag sparen, sobald er in Reichweite ist (keine Drops, Schläge, Neubauten außer Energie)
+  const pl = g.players[owner], eg = g.endgameDef(owner);
+  const saving = !!eg && !pl.endgameUsed && g.round >= ENDGAME_ROUND - 2 && g.hasActive(owner, 'kontor') && pl.credits >= eg.cost * 0.45;
+  g._aiSaving = g._aiSaving || {}; g._aiSaving[owner] = saving;
+  if (!saving || pl.low) aiBuild(g, owner);
+  if (!saving) aiProduce(g, owner);
   if (!g.aiPassive) await aiCards(g, act, owner);
 
   const mine = g.ownUnits(owner);
@@ -152,7 +157,7 @@ export async function aiTurn(g, act, owner = 1) {
   const enemyHome = g.map.starts[enemy];
   const stage = home ? stagingHex(g, home, enemyHome) : null;
 
-  if (!g.aiPassive) { aiDrop(g, owner, mode, enemyB); aiStrike(g, owner); }
+  if (!g.aiPassive && !(g._aiSaving && g._aiSaving[owner])) { aiDrop(g, owner, mode, enemyB); aiStrike(g, owner); }
   // Sondereinheiten ohne Waffe: Pionier und Spion
   for (const u of mine) {
     if (u.dead || u.acted || u.moved || g.aiPassive) continue;
@@ -423,6 +428,17 @@ async function specialAct(g, u, act) {
     const adj2 = g.adjBuildings(u, true);
     if (adj2.length) { if (u.def.capture) await act.capture(u, adj2[0]); else await act.infiltrate(u, adj2[0]); }
   }
+}
+
+// ---------- KI: Entscheidungsschlag nahe der feindlichen Basis ----------
+function aiEndgame(g, owner) {
+  if (!g.canEndgame(owner)) return;
+  const foeB = g.buildings.filter((b) => !b.dead && b.owner !== owner);
+  if (!foeB.length) return;
+  const key = foeB.find((b) => b.type === 'bauhof') || foeB[0];
+  let best = null, bd = 1e9;
+  for (const [c, r] of g.endgameHexes(owner)) { const d = distance(c, r, key.c, key.r) + (g.isSand(c, r) && g.players[owner].faction !== 'sandvolk' ? 1.5 : 0); if (d < bd) { bd = d; best = [c, r]; } }
+  if (best) g.orderEndgame(owner, best[0], best[1]);
 }
 
 // ---------- KI: Orbitalbombardement ----------
