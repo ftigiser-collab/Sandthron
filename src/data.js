@@ -170,6 +170,14 @@ export const POIS = {
   heiligtum:  { name: 'Felsenheiligtum', icon: '⛰', text: 'Eigene Einheiten auf und neben dem Heiligtum heilen 15 pro Runde. Wer darauf steht, erhält 25 % Deckung.' },
 };
 
+// Erfahrung: Ränge mit Schwellen und Boni
+export const RANKS = [
+  { name: 'Rekrut', xp: 0, dmg: 1, taken: 1 },
+  { name: 'Veteran', xp: 50, dmg: 1.1, taken: 0.94 },
+  { name: 'Elite', xp: 130, dmg: 1.2, taken: 0.88, sight: 1 },
+  { name: 'Held', xp: 260, dmg: 1.3, taken: 0.8, sight: 1, move: 1, regen: 10 },
+];
+
 export const WORM_SIZES = {
   1: { name: 'Sandwurm', steps: 3, sated: 3, weight: 60, scale: 1 },
   2: { name: 'Großer Wurm', steps: 4, sated: 3, weight: 30, scale: 1.4 },

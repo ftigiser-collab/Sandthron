@@ -497,6 +497,22 @@ export class Renderer {
       ctx.fillStyle = 'rgba(10,10,12,0.8)'; ctx.fillRect(x, y, 14, 4);
       ctx.fillStyle = '#ff9a3c'; ctx.fillRect(x, y, 14 * e.cargo / e.def.capacity, 4);
     }
+    // Rangabzeichen: Winkel für Veteran/Elite, Stern für Helden
+    if (e.isUnit && e.rank) {
+      const x = p.x - 20, y = p.y - 14 - air, gold = e.rank >= 3;
+      ctx.save(); ctx.translate(x, y);
+      if (e.promoGlow > 0) { ctx.fillStyle = `rgba(255,215,120,${0.5 * e.promoGlow})`; ctx.beginPath(); ctx.arc(0, 2, 12, 0, 6.28); ctx.fill(); }
+      ctx.fillStyle = 'rgba(10,10,12,0.8)'; ctx.beginPath(); ctx.roundRect(-6.5, -6, 13, e.rank >= 3 ? 19 : 6 + e.rank * 4.5, 3); ctx.fill();
+      ctx.strokeStyle = gold ? '#ffd36a' : '#e8e2d0'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      const n = Math.min(2, e.rank);
+      for (let k = 0; k < n; k++) { const yy = -3 + k * 4.5; ctx.beginPath(); ctx.moveTo(-4, yy); ctx.lineTo(0, yy + 2.6); ctx.lineTo(4, yy); ctx.stroke(); }
+      if (e.rank >= 3) {
+        ctx.fillStyle = '#ffd36a'; ctx.beginPath();
+        for (let i = 0; i < 10; i++) { const a = i / 10 * 6.283 - 1.571, r = i % 2 ? 2 : 4.6; ctx.lineTo(Math.cos(a) * r, 9 + Math.sin(a) * r); }
+        ctx.closePath(); ctx.fill();
+      }
+      ctx.restore();
+    }
     if (e.isUnit && e.def.ammo && e.ammo <= 0) {
       ctx.fillStyle = 'rgba(255,90,60,0.95)'; ctx.font = 'bold 10px system-ui'; ctx.textAlign = 'center'; ctx.fillText('LEER', p.x, p.y - air - 20);
     }

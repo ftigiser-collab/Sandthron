@@ -1,5 +1,5 @@
 // Steuerung: Eingabe, Auswahl, Menüs, Animationen, Rundenablauf
-import { UNITS, BUILDINGS, WEAPONS, TERRAIN, MOVE_COST, CARDS, DROPS, FACTIONS, ARMOR_MOD, ORBITAL_STRIKE , POIS, ENDGAME, ENDGAME_ROUND } from './data.js';
+import { UNITS, BUILDINGS, WEAPONS, TERRAIN, MOVE_COST, CARDS, DROPS, FACTIONS, ARMOR_MOD, ORBITAL_STRIKE , POIS, ENDGAME, ENDGAME_ROUND, RANKS } from './data.js';
 import { center, pixelToHex, distance, R, ring } from './hex.js';
 import { icon, cardArt } from './sprites.js';
 import { angDiff } from './util.js';
@@ -58,7 +58,7 @@ export class Controller {
     const sand = (h) => this.g.isSand(h.c, h.r);
     // Eigene Einheiten decken während der Bewegung auf, Feld für Feld (kein Verschwinden im Schwarz)
     const g = this.g, revealed = new Set();
-    const sight = u.owner === 0 && !u.carried ? Math.max(1, u.def.sight - (g.isNight() && u.def.mt !== 'air' ? 1 : 0)) : 0;
+    const sight = u.owner === 0 && !u.carried ? Math.max(1, u.def.sight + (RANKS[u.rank || 0].sight || 0) - (g.isNight() && u.def.mt !== 'air' ? 1 : 0)) : 0;
     const revealAt = (j) => {
       if (!sight || revealed.has(j)) return; revealed.add(j);
       const h = path[j]; let changed = false;
@@ -169,6 +169,18 @@ export class Controller {
   async animAttack(ev) {
     const sp = this.speed; this.speed = sp * 0.65;
     try { await this.animAttackInner(ev); } finally { this.speed = sp; }
+    if (ev.promos) for (const pr of ev.promos) await this.animPromotion(pr);
+  }
+  // Beförderung: goldener Ring, Funken, aufsteigende Abzeichen
+  async animPromotion(pr) {
+    const g = this.g, u = g.get(pr.u); if (!u || u.dead || !(u.owner === 0 || g.seen(u))) return;
+    const p = this.r.posOf(u), z = u.def.mt === 'air' ? (u.z ?? 26) : 0, y = p.y - z;
+    this.fx.ring(p.x, y, 16, '255,215,120', 0.7); this.fx.flash(p.x, y, 34, '255,220,140', 0.25);
+    this.fx.spark(p.x, y, 18, '255,215,120', 90);
+    this.r.float(p.x, y - 30, `${'★'.repeat(pr.rank)} ${RANKS[pr.rank].name}!`, '#ffd36a', true);
+    u.promoGlow = 1;
+    await this.tween(0.9, (k) => { u.promoGlow = 1 - k; });
+    u.promoGlow = 0;
   }
   async animAttackInner(ev) {
     const g = this.g;
@@ -1216,6 +1228,14 @@ export class Controller {
     this.refresh();
   }
 
+  xpBar(e) {
+    if (!e.isUnit || !this.g.canGainXp(e)) return '';
+    const r = e.rank || 0, xp = e.xp || 0;
+    if (r >= RANKS.length - 1) return '<div class="xpbar max"><i style="width:100%"></i></div>';
+    const a = RANKS[r].xp, b = RANKS[r + 1].xp;
+    return `<div class="xpbar" title="Erfahrung"><i style="width:${Math.min(100, (xp - a) / (b - a) * 100)}%"></i></div>`;
+  }
+
   showPanel(e, keep = false) {
     const el = $('#panel');
     if (!e || e.dead) { el.classList.remove('show'); el.innerHTML = ''; return; }
@@ -1224,12 +1244,13 @@ export class Controller {
     const col = g.players[e.owner].color;
     const pct = e.isBuilding ? e.hp / e.maxHp * 100 : e.hp;
     const bar = `<div class="hpbar"><i style="width:${pct}%;background:${pct > 60 ? '#6fdc6a' : pct > 30 ? '#f2d35b' : '#ff6a50'}"></i></div>`;
-    let html = `<div class="p-head"><canvas class="p-icon"></canvas><div><div class="p-name">${e.def.name}</div><div class="p-sub" style="color:${col}">${g.players[e.owner].name}${e.isUnit ? ` · Stärke ${Math.ceil(e.hp)}` : ''}</div>${bar}</div><button class="more" data-a="expand">${this.expanded ? 'Weniger' : 'Details'}</button><button class="x" data-a="close">×</button></div>`;
+    let html = `<div class="p-head"><canvas class="p-icon"></canvas><div><div class="p-name">${e.def.name}</div><div class="p-sub" style="color:${col}">${g.players[e.owner].name}${e.isUnit ? ` · Stärke ${Math.ceil(e.hp)}` : ''}${e.isUnit && e.rank ? ` · <span class="rank r${e.rank}">${'★'.repeat(e.rank)} ${RANKS[e.rank].name}</span>` : ''}</div>${bar}${this.xpBar(e)}</div><button class="more" data-a="expand">${this.expanded ? 'Weniger' : 'Details'}</button><button class="x" data-a="close">×</button></div>`;
     if (e.isUnit) {
       const w = g.weapon(e);
       html += `<div class="p-grid">
         <span>Stärke</span><b>${Math.ceil(e.hp)} / 100</b>
-        <span>Bewegung</span><b>${e.def.move} (${MT_NAME[e.def.mt]})</b>
+        ${g.canGainXp(e) ? `<span>Rang</span><b>${RANKS[e.rank || 0].name} · ${Math.floor(e.xp || 0)} EP${(e.rank || 0) < RANKS.length - 1 ? ` (nächster Rang ab ${RANKS[(e.rank || 0) + 1].xp})` : ''}${e.rank ? ` · Schaden +${Math.round((RANKS[e.rank].dmg - 1) * 100)} %, erlittener Schaden −${Math.round((1 - RANKS[e.rank].taken) * 100)} %${RANKS[e.rank].sight ? ', Sicht +1' : ''}${RANKS[e.rank].move ? ', Bewegung +1, heilt 10/Runde' : ''}` : ''}</b>` : ''}
+        <span>Bewegung</span><b>${g.moveOf(e)} (${MT_NAME[e.def.mt]})</b>
         <span>Panzerung</span><b>${ARMOR_NAME[e.def.armor]}</b>
         <span>Sicht</span><b>${e.def.sight}</b>
         ${w ? `<span>Waffe</span><b>Stärke ${w.power} · Reichweite ${w.range[0] === w.range[1] ? w.range[0] : w.range.join('–')}${w.air ? ' · Luft' : ''}${w.ground ? '' : ' (nur Luft)'}</b>` : ''}

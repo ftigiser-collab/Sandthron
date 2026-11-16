@@ -1,5 +1,5 @@
 // Spielregeln und Zustand (rundenbasiert)
-import { UNITS, BUILDINGS, WEAPONS, ARMOR_MOD, TERRAIN, MOVE_COST, FACTIONS, START_CREDITS, DROPS, CARDS, WORM_SIZES, ORBITAL_STRIKE, SHIELD_PIERCE, POIS, ENDGAME, ENDGAME_ROUND } from './data.js';
+import { UNITS, BUILDINGS, WEAPONS, ARMOR_MOD, TERRAIN, MOVE_COST, FACTIONS, START_CREDITS, DROPS, CARDS, WORM_SIZES, ORBITAL_STRIKE, SHIELD_PIERCE, POIS, ENDGAME, ENDGAME_ROUND, RANKS } from './data.js';
 import { neighbors, distance, ring, center } from './hex.js';
 const LANDED = {};
 const ang = (c1, r1, c2, r2) => { const a = center(c1, r1), b = center(c2, r2); return Math.atan2(b.y - a.y, b.x - a.x); };
@@ -45,7 +45,7 @@ export class Game {
   }
   moveOf(u) {
     const pk = this.players[u.owner].perk;
-    return u.def.move + (u.def.mt === 'air' && pk.airMove ? pk.airMove : 0) + ((u.def.mt === 'foot' || u.def.mt === 'sandfoot') && pk.infMove ? pk.infMove : 0) + (u.def.cat === 'sv' && pk.svMove ? pk.svMove : 0);
+    return u.def.move + (RANKS[u.rank || 0].move || 0) + (u.def.mt === 'air' && pk.airMove ? pk.airMove : 0) + ((u.def.mt === 'foot' || u.def.mt === 'sandfoot') && pk.infMove ? pk.infMove : 0) + (u.def.cat === 'sv' && pk.svMove ? pk.svMove : 0);
   }
   dropCost(owner, id) {
     const p = this.players[owner];
@@ -300,6 +300,8 @@ export class Game {
     if (t.isUnit && t.def.tough) dmg *= t.def.tough;
     if (t.isUnit && t.def.elite) dmg *= t.def.elite;
     if (w.type === 'laser' && t.isUnit && t.def.shield) dmg *= 2.5;
+    if (att.isUnit && att.rank) dmg *= RANKS[att.rank].dmg;
+    if (t.isUnit && t.rank) dmg *= RANKS[t.rank].taken;
     if (t.isBuilding) dmg = dmg * t.maxHp / 100; // Gebäude-TP skalieren
     return dmg;
   }
@@ -349,9 +351,31 @@ export class Game {
       if (cw.ammo) t.ammo--;
       if (att.hp <= 0.5) { ev.counterKilled = true; this.kill(att, t); }
     }
+    if (!att.dead) this.gainXp(att, this.xpFor(ev.dmg, t, ev.killed), ev);
+    if (t.isUnit && !t.dead && ev.counter) this.gainXp(t, this.xpFor(ev.counter, att, ev.counterKilled) + 4, ev);
+    if (t.isUnit && !t.dead && !ev.counter) this.gainXp(t, 3, ev); // überlebt
     return ev;
   }
   pct(v, e) { return e.isBuilding ? (v / e.maxHp) * 100 : v; }
+
+  // ---------- Erfahrung ----------
+  canGainXp(u) { return u && u.isUnit && !u.dead && !u.def.harvester && !u.def.carrier; }
+  gainXp(u, amount, ev) {
+    if (!this.canGainXp(u) || amount <= 0) return;
+    u.xp = (u.xp || 0) + amount;
+    let r = u.rank || 0;
+    while (r < RANKS.length - 1 && u.xp >= RANKS[r + 1].xp) r++;
+    if (r > (u.rank || 0)) {
+      u.rank = r;
+      u.hp = Math.min(100, u.hp + 15);
+      (ev.promos || (ev.promos = [])).push({ u: u.id, rank: r });
+      if (u.owner === 0) this.say(`${u.def.name} befördert: ${RANKS[r].name}!`, 'good');
+    }
+  }
+  xpFor(dmgPct, target, killed) {
+    const big = target.isBuilding ? 1.2 : target.def.cat === 'veh' || target.def.mt === 'air' ? 1.15 : 1;
+    return dmgPct * 0.5 * big + (killed ? 22 * big : 0);
+  }
 
   // Reaktionsfeuer: wer in der eigenen Runde nicht angegriffen hat, schießt einmal auf Gegner, die in Reichweite ziehen
   reflexFire(mover) {
@@ -369,6 +393,7 @@ export class Game {
       if (w.ammo) s.ammo--;
       const e = { type: 'attack', att: s.id, target: mover.id, dmg: this.pct(dmg, mover), proj: w.proj, counter: 0, killed: false, reflex: true };
       if (mover.hp <= 0.5) { e.killed = true; this.kill(mover, s); }
+      this.gainXp(s, this.xpFor(e.dmg, mover, e.killed), e);
       ev.push(e);
     }
     return ev;
@@ -520,6 +545,7 @@ export class Game {
       if (u.shield > 0) u.shield--;
       if (u.stunned > 0) { u.stunned--; u.moved = true; u.acted = true; u.wasStunned = true; } else u.wasStunned = false;
       u.didLand = false;
+      if (u.rank && RANKS[u.rank].regen && u.hp < 100) u.hp = Math.min(100, u.hp + RANKS[u.rank].regen);
       if (u.landed) {
         if (u.hp < 100) { const h = Math.min(100 - u.hp, 20); u.hp += h; ev.push({ type: 'heal', u: u.id, amount: h }); }
         if (u.def.ammo && u.ammo < u.def.ammo) { u.ammo = u.def.ammo; ev.push({ type: 'rearm', u: u.id }); }
@@ -1033,7 +1059,7 @@ export class Game {
   updateVision() {
     this.visible.fill(0); this.radar.fill(0);
     const reveal = (c, r, rad, arr = this.visible) => { for (const [x, y] of ring(c, r, rad, this.W, this.H)) arr[this.i(x, y)] = 1; };
-    for (const u of this.units) if (!u.dead && u.owner === 0 && !u.carried) reveal(u.c, u.r, Math.max(1, u.def.sight - (this.isNight() && u.def.mt !== 'air' ? 1 : 0)));
+    for (const u of this.units) if (!u.dead && u.owner === 0 && !u.carried) reveal(u.c, u.r, Math.max(1, u.def.sight + (RANKS[u.rank || 0].sight || 0) - (this.isNight() && u.def.mt !== 'air' ? 1 : 0)));
     for (const b of this.buildings) if (!b.dead && b.owner === 0) {
       reveal(b.c, b.r, b.def.sight);
       if (b.def.radar && b.turnsLeft <= 0 && !this.players[0].low) reveal(b.c, b.r, 9, this.radar);
