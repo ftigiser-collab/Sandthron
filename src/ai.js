@@ -2,7 +2,7 @@
 import { UNITS, BUILDINGS, CARDS, DROPS } from './data.js';
 import { distance, neighbors } from './hex.js';
 
-const PLAN = ['windfalle', 'raffinerie', 'kaserne', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'ausguck', 'windfalle', 'konvent', 'turm', 'horst', 'windfalle', 'kontor', 'flak', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'turm', 'flak', 'windfalle'];
+const PLAN = ['windfalle', 'raffinerie', 'kaserne', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'horst', 'ausguck', 'windfalle', 'konvent', 'turm', 'windfalle', 'kontor', 'flak', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'turm', 'flak', 'windfalle'];
 
 function value(g, e) {
   if (e.isBuilding) return e.type === 'bauhof' ? 2500 : e.def.weapon ? 900 : e.def.cost * 0.6;
@@ -60,6 +60,65 @@ export async function autoHarvest(g, u, act) {
   if (step && (step.c !== u.c || step.r !== u.r)) await act.move(u, step.c, step.r, reach);
 }
 
+// ---------- Auto-Träger (Lufttransport für Ernter) ----------
+export async function autoCarry(g, car, act) {
+  if (car.dead || car.acted || car.moved || car.carrying) return;
+  const owner = car.owner;
+  const refs = g.buildings.filter((b) => !b.dead && b.owner === owner && b.type === 'raffinerie' && b.turnsLeft <= 0);
+  if (!refs.length) return;
+  const knows = (w) => owner !== 0 || g.wormSeen(w);
+  const wormD = (c, r) => Math.min(99, ...g.worms.filter(knows).map((w) => distance(c, r, w.c, w.r)));
+  const harvs = g.ownUnits(owner).filter((u) => u.def.harvester && !u.carried && !u.acted && !u.moved);
+  const refD = (u) => Math.min(...refs.map((b) => distance(b.c, b.r, u.c, u.r)));
+  let best = null, bs = 0;
+  for (const h of harvs) {
+    const danger = g.isSand(h.c, h.r) ? Math.max(0, 6 - wormD(h.c, h.r)) : 0;
+    let need = 0, goal = null;
+    if (danger >= 2) { need = 10 + danger; goal = h.cargo > h.def.capacity * 0.4 ? 'ref' : 'spice'; }
+    else if (h.cargo >= h.def.capacity - 1 && refD(h) > 3) { need = 6 + refD(h); goal = 'ref'; }
+    else if (h.cargo < h.def.capacity && g.spiceAt(h.c, h.r) <= 0 && h.cargo < h.def.capacity * 0.3) {
+      let sp = 99; for (let r = 0; r < g.H; r++) for (let c = 0; c < g.W; c++) if (g.spiceAt(c, r) > 0) sp = Math.min(sp, distance(c, r, h.c, h.r));
+      if (sp > 4) { need = 3 + sp * 0.5; goal = 'spice'; }
+    }
+    if (!need) continue;
+    const reach = g.reachable(car);
+    let pick = null, pd = Infinity;
+    for (const n of reach.values()) if (n.end && distance(n.c, n.r, h.c, h.r) <= 1 && n.cost < pd) { pd = n.cost; pick = n; }
+    if (!pick) continue;
+    if (need - pd * 0.2 > bs) { bs = need - pd * 0.2; best = { h, pick, reach, goal }; }
+  }
+  if (!best) return;
+  const { h, pick, reach, goal } = best;
+  if (pick.c !== car.c || pick.r !== car.r) await act.move(car, pick.c, pick.r, reach);
+  if (car.dead || !g.canPickup(car, h)) return;
+  await act.pickup(car, h);
+  // Zweiter Flugabschnitt mit voller Reichweite (Träger sind auf Transport ausgelegt)
+  car.moved = false; car.acted = false;
+  const reach2 = g.reachable(car);
+  let dest = null, dd = Infinity;
+  for (const n of reach2.values()) {
+    if (!n.end) continue;
+    for (const [c, r] of [[n.c, n.r], ...neighbors(n.c, n.r, g.W, g.H)]) {
+      if (!g.groundFree(c, r) || g.cost(h.def.mt, c, r) === Infinity || g.inStorm(c, r)) continue;
+      const wd = g.isSand(c, r) ? wormD(c, r) : 99;
+      if (wd < 4) continue;
+      let score;
+      if (goal === 'ref') score = refs.some((b) => distance(b.c, b.r, c, r) <= 1) ? n.cost : Infinity;
+      else score = g.spiceAt(c, r) > 0 && !g.unitAt(c, r, false) ? n.cost - wd * 0.3 : Infinity;
+      if (score < dd) { dd = score; dest = { n, c, r }; }
+    }
+  }
+  if (!dest) {
+    // Notfall: sicher auf Fels absetzen
+    for (const n of reach2.values()) if (n.end && !g.isSand(n.c, n.r) && g.groundFree(n.c, n.r) && g.cost(h.def.mt, n.c, n.r) < Infinity) { const s = n.cost; if (s < dd) { dd = s; dest = { n, c: n.c, r: n.r }; } }
+  }
+  if (!dest) { car.acted = true; return; }
+  if (dest.n.c !== car.c || dest.n.r !== car.r) await act.move(car, dest.n.c, dest.n.r, reach2);
+  if (!car.dead) await act.drop(car, dest.c, dest.r);
+  car.acted = true; car.moved = true;
+  h.moved = true;
+}
+
 // ---------- KI-Zug ----------
 export async function aiTurn(g, act, owner = 1) {
   const enemy = 1 - owner;
@@ -92,6 +151,7 @@ export async function aiTurn(g, act, owner = 1) {
     }
     await unitAct(g, u, act, mode, { threats, enemyB, enemyU, stage, home });
   }
+  for (const u of mine) if (u.def.carrier && !u.dead) await autoCarry(g, u, act);
   for (const u of mine) if (u.def.harvester && !u.dead) await autoHarvest(g, u, act);
 }
 
@@ -215,7 +275,8 @@ export function aiProduce(g, owner) {
     } else if (b.def.produces === 'inf') opts = [['inf', 3], ['rak', 2]];
     else if (b.def.produces === 'air') {
       const foeAir = g.units.filter((u) => !u.dead && u.owner !== owner && u.def.mt === 'air').length;
-      opts = [['falke', 3], ['libelle', 1], ['bomber', 2], ['jaeger', foeAir ? 3 : 0]];
+      const carriers = g.ownUnits(owner).filter((u) => u.def.carrier).length;
+      opts = carriers < 1 && harvesters >= 2 ? [['traeger', 10]] : [['falke', 3], ['libelle', 1], ['bomber', 2], ['jaeger', foeAir ? 3 : 0]];
     } else if (b.def.produces === 'sis') opts = [['schwester', g.ownUnits(owner).filter((u) => u.type === 'schwester').length < 2 ? 2 : 0]];
     opts = opts.filter(([, w]) => w > 0);
     opts = opts.filter(([t]) => g.prereqOk(owner, UNITS[t]) && p.credits >= g.unitCost(owner, t) + (t === 'ernter' ? 0 : reserve));

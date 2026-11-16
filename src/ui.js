@@ -1,9 +1,9 @@
 // Steuerung: Eingabe, Auswahl, Menüs, Animationen, Rundenablauf
-import { UNITS, BUILDINGS, WEAPONS, TERRAIN, MOVE_COST, CARDS, DROPS, FACTIONS } from './data.js';
+import { UNITS, BUILDINGS, WEAPONS, TERRAIN, MOVE_COST, CARDS, DROPS, FACTIONS, ARMOR_MOD } from './data.js';
 import { center, pixelToHex, distance, R } from './hex.js';
 import { icon, cardArt } from './sprites.js';
 import { angDiff } from './util.js';
-import { aiTurn, autoHarvest } from './ai.js';
+import { aiTurn, autoHarvest, autoCarry } from './ai.js';
 
 const $ = (s) => document.querySelector(s);
 const ARMOR_NAME = { inf: 'Infanterie', light: 'Leicht', heavy: 'Schwer', air: 'Luft', bld: 'Gebäude' };
@@ -22,6 +22,8 @@ export class Controller {
       attack: (u, t) => this.doAttack(u, t),
       voice: (u, t) => this.doVoice(u, t),
       card: (owner, idx, c, r) => this.doCard(owner, idx, c, r),
+      pickup: (car, t) => this.animPickup(car, t),
+      drop: (car, c, r) => this.animDrop(car, c, r),
     };
     this.bindInput();
     this.bindDom();
@@ -377,7 +379,7 @@ export class Controller {
   }
 
   // ---------- Aktionen ----------
-  async doMove(u, c, r, reach, animatedFollow) {
+  async doMove(u, c, r, reach) {
     const g = this.g;
     const path = g.moveUnit(u, c, r, reach);
     const visible = u.owner === 0 || path.some((h) => g.visible[g.i(h.c, h.r)]);
@@ -386,6 +388,37 @@ export class Controller {
       await this.animMove(u, path);
     }
     if (u.owner === 0) { g.updateVision(); this.r.fogDirty = true; }
+    if (u.ambushed) {
+      const o = g.get(u.ambushed);
+      if (o && (u.owner === 0 || o.owner === 0)) { const p = this.r.posOf(o); this.r.float(p.x, p.y - 20, 'Hinterhalt!', '#ffcf6a', true); this.hitFlash(o); await this.wait(0.4); }
+    }
+    const evs = g.reflexFire(u);
+    for (const ev of evs) {
+      const a = g.byId.get(ev.att);
+      if (a && (g.seen(a) || a.owner === 0 || u.owner === 0)) { const p = this.r.posOf(a); this.r.float(p.x, p.y - 26, 'Reaktionsfeuer', '#ffe08a'); }
+      await this.animAttack(ev);
+    }
+    if (evs.length) { g.cleanup(); this.checkEnd(); }
+  }
+
+  async animPickup(car, t) {
+    const g = this.g;
+    g.pickup(car, t);
+    if (car.owner === 0 || g.seen(car)) {
+      const from = center(t.c, t.r), to = this.r.posOf(car);
+      t.vis = { ...from }; await this.tween(0.4, (k) => { t.vis = { x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k - 20 * k }; }); t.vis = null;
+    }
+  }
+  async animDrop(car, c, r) {
+    const g = this.g;
+    const ev = g.drop(car, c, r); if (!ev) return;
+    const t = g.get(ev.t);
+    if (t && (car.owner === 0 || g.seen(car))) {
+      const from = this.r.posOf(car), to = center(c, r);
+      t.vis = { ...from }; await this.tween(0.4, (k) => { t.vis = { x: from.x + (to.x - from.x) * k, y: from.y - 20 * (1 - k) + (to.y - from.y) * k }; }); t.vis = null;
+      this.fx.dust(to.x, to.y, 8, '200,160,110', 20, 6);
+    }
+    if (car.owner === 0) { g.updateVision(); this.r.fogDirty = true; }
   }
 
   async doAttack(u, t) {
@@ -399,7 +432,7 @@ export class Controller {
   // ---------- Auswahl ----------
   clearHL() { Object.assign(this.r.hl, { move: null, attack: [], build: [], drop: [], target: [], path: null, sel: null, forecast: null }); this.hideForecast(); }
 
-  deselect() { this.sel = null; this.mode = 'idle'; this.reach = null; this.afterMove.clear(); this.clearHL(); this.showPanel(null); }
+  deselect() { this.infoSel = null; this.sel = null; this.mode = 'idle'; this.reach = null; this.afterMove.clear(); this.clearHL(); this.showPanel(null); }
 
   select(e) {
     const g = this.g;
@@ -457,11 +490,7 @@ export class Controller {
     }
     if (this.mode === 'drop') {
       if (this.r.hl.drop.some(([dc, dr]) => dc === c && dr === r)) {
-        const ev = g.drop(this.sel, c, r);
-        const t = g.get(ev.t); const from = this.r.posOf(this.sel), to = center(c, r);
-        t.vis = { ...from }; await this.tween(0.35, (k) => { t.vis = { x: from.x + (to.x - from.x) * k, y: from.y - 20 * (1 - k) + (to.y - from.y) * k }; }); t.vis = null;
-        this.fx.dust(to.x, to.y, 8, '200,160,110', 20, 6);
-        g.updateVision(); this.r.fogDirty = true;
+        await this.animDrop(this.sel, c, r);
         this.deselect(); this.refresh(); return;
       }
       this.mode = 'moved'; this.select(this.sel); return;
@@ -479,9 +508,7 @@ export class Controller {
     if (this.mode === 'pickup') {
       const t = ownAt.find((e) => g.canPickup(this.sel, e));
       if (t) {
-        const ev = g.pickup(this.sel, t);
-        const from = this.r.posOf(t), to = this.r.posOf(this.sel);
-        t.vis = { ...from }; await this.tween(0.35, (k) => { t.vis = { x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k - 20 * k }; }); t.vis = null;
+        await this.animPickup(this.sel, t);
         const car = this.sel; this.deselect(); this.refresh();
         if (!car.acted) { this.select(car); this.flash('Aufgenommen — jetzt fliegen und absetzen'); }
         return;
@@ -572,9 +599,12 @@ export class Controller {
     if (this.busy || g.current !== 0 || g.state !== 'play') return;
     this.busy = true; this.deselect();
     $('#endturn').disabled = true;
-    // Auto-Ernter
+    // Auto-Träger und Auto-Ernter
+    for (const u of g.ownUnits(0)) if (u.def.carrier && u.auto && !u.moved && !u.acted) await autoCarry(g, u, this.actAnimated);
     for (const u of g.ownUnits(0)) if (u.def.harvester && u.auto && !u.moved) await autoHarvest(g, u, this.actAnimated);
     await this.playEvents(g.endTurnEvents(0));
+    if (this.checkEnd()) return;
+    await this.playEvents(g.wormPhase());
     if (this.checkEnd()) return;
     const foe = g.players[1];
     await this.banner(foe.name, 'ist am Zug', 0.9);
@@ -583,7 +613,10 @@ export class Controller {
     await aiTurn(g, this.actAnimated, 1);
     await this.playEvents(g.endTurnEvents(1));
     if (this.checkEnd()) return;
-    await this.banner('Weltphase', 'Sturm · Würmer · Glut', 0.8);
+    await this.playEvents(g.wormPhase());
+    g.updateVision(); this.r.fogDirty = true;
+    if (this.checkEnd()) return;
+    await this.banner('Weltphase', 'Sturm · Glut', 0.7);
     await this.playEvents(g.worldPhase());
     g.updateVision(); this.r.fogDirty = true;
     if (this.checkEnd()) return;
@@ -763,7 +796,7 @@ export class Controller {
     const col = g.players[e.owner].color;
     const pct = e.isBuilding ? e.hp / e.maxHp * 100 : e.hp;
     const bar = `<div class="hpbar"><i style="width:${pct}%;background:${pct > 60 ? '#6fdc6a' : pct > 30 ? '#f2d35b' : '#ff6a50'}"></i></div>`;
-    let html = `<div class="p-head"><canvas class="p-icon"></canvas><div><div class="p-name">${e.def.name}</div><div class="p-sub" style="color:${col}">${g.players[e.owner].name}</div>${bar}</div><button class="x" data-a="close">×</button></div>`;
+    let html = `<div class="p-head"><canvas class="p-icon"></canvas><div><div class="p-name">${e.def.name}</div><div class="p-sub" style="color:${col}">${g.players[e.owner].name}${e.isUnit ? ` · Stärke ${Math.ceil(e.hp)}` : ''}</div>${bar}</div><button class="more" data-a="expand">${this.expanded ? 'Weniger' : 'Details'}</button><button class="x" data-a="close">×</button></div>`;
     if (e.isUnit) {
       const w = g.weapon(e);
       html += `<div class="p-grid">
@@ -780,8 +813,11 @@ export class Controller {
       if (own && g.current === 0) {
         const btns = [];
         if (e.def.harvester) btns.push(`<button data-a="auto" class="${e.auto ? 'on' : ''}">Auto-Ernte: ${e.auto ? 'an' : 'aus'}</button>`);
+        const tg = g.canFire(e) ? g.targetsFrom(e, e.c, e.r).length : 0;
+        if (tg && e.moved) btns.push(`<span class="hint">${tg} Ziel${tg > 1 ? 'e' : ''} in Reichweite — rot markiert antippen</span>`);
         if (e.def.voice) btns.push(g.canVoice(e) ? (g.voiceTargets(e).length ? '<button data-a="voice" class="purple">Stimme einsetzen</button>' : '<button disabled>Stimme: kein Ziel in 2 Feldern</button>') : `<button disabled>Stimme bereit in ${e.voiceCd || 0} ${e.voiceCd === 1 ? 'Runde' : 'Runden'}</button>`);
         if (e.stunned > 0 || e.wasStunned) btns.push('<button disabled>Gelähmt</button>');
+        if (e.def.carrier) btns.push(`<button data-a="auto" class="${e.auto ? 'on' : ''}">Auto-Transport: ${e.auto ? 'an' : 'aus'}</button>`);
         if (e.def.carrier && !e.acted) {
           if (e.carrying) btns.push('<button data-a="drop">Absetzen</button>');
           else if (g.units.some((t) => g.canPickup(e, t))) btns.push('<button data-a="pickup">Aufnehmen</button>');
@@ -799,12 +835,54 @@ export class Controller {
         <div class="p-desc">${e.def.desc}</div>`;
       if (own && g.current === 0 && e.turnsLeft <= 0) html += this.buildMenuHtml(e);
     }
+    if (e.isUnit) html += `<div class="p-detail">${this.profileHtml('unit', e.type)}</div>`;
     el.innerHTML = html;
     el.classList.add('show');
+    el.classList.toggle('expanded', !!this.expanded);
+    if (this.infoSel && el.querySelector('.cards')) this.showInfo(this.infoSel.kind, this.infoSel.type, e);
     const ic = el.querySelector('.p-icon');
     if (ic) { const src = icon(e.isUnit ? 'unit' : 'bld', e.type, col); ic.width = 60; ic.height = 45; ic.getContext('2d').drawImage(src, 0, 0, 60, 45); }
     el.querySelectorAll('canvas[data-icon]').forEach((c) => { const [k, t] = c.dataset.icon.split(':'); const src = icon(k, t, g.players[0].color); c.width = 72; c.height = 54; c.getContext('2d').drawImage(src, 0, 0, 72, 54); });
     el.querySelectorAll('[data-a]').forEach((b) => b.onclick = (ev) => this.panelAction(b.dataset.a, b.dataset.t, e, ev));
+  }
+
+  showInfo(kind, type, b) {
+    const g = this.g, p = g.players[0], box = $('#pinfo'); if (!box) return;
+    const isB = kind === 'bld', d = isB ? BUILDINGS[type] : UNITS[type];
+    const cost = isB ? d.cost : g.unitCost(0, type);
+    const ok = isB ? (g.bauhofReady(0) && g.prereqOk(0, d) && p.credits >= cost) : g.canProduce(b, type);
+    const missing = g.prereqOk(0, d) ? '' : 'Benötigt: ' + d.prereq.filter((x) => !g.has(0, x)).map((x) => BUILDINGS[x].name).join(', ');
+    const why = ok ? '' : missing || (p.credits < cost ? 'Zu wenig Credits' : isB ? 'Bauhof hat diese Runde schon gebaut' : b.producing ? 'Produziert bereits' : p.low ? 'Energie zu niedrig' : 'Nicht verfügbar');
+    box.innerHTML = `<div class="pi-head"><b>${d.name}</b><span>◈ ${cost}${isB ? ` · ${d.turns} ${d.turns === 1 ? 'Runde' : 'Runden'}` : ' · nächste Runde'}</span></div>
+      ${this.profileHtml(kind, type)}
+      <button class="primary wide" data-a="${isB ? 'build' : 'prod'}" data-t="${type}" ${ok ? '' : 'disabled'}>${isB ? 'Bauen' : 'Produzieren'}</button>${why ? `<div class="pi-why">${why}</div>` : ''}`;
+    box.querySelectorAll('[data-a]').forEach((btn) => btn.onclick = () => this.panelAction(btn.dataset.a, btn.dataset.t, b));
+    document.querySelectorAll('#panel .card').forEach((c) => c.classList.toggle('sel', c.dataset.t === `${kind}:${type}`));
+  }
+
+  profileHtml(kind, type) {
+    const CLS = { inf: 'Infanterie', light: 'leichte Fahrzeuge', heavy: 'Panzer', bld: 'Gebäude', air: 'Thopter' };
+    if (kind === 'bld') {
+      const d = BUILDINGS[type];
+      const extra = [];
+      if (d.power) extra.push(`Energie ${d.power > 0 ? '+' : ''}${d.power}`);
+      if (d.weapon) { const w = WEAPONS[d.weapon]; extra.push(`Reichweite ${w.range.join('–')}`); }
+      return `<div class="pi-desc">${d.desc}</div><div class="pi-tags">${extra.map((x) => `<span>${x}</span>`).join('')}<span>Stabilität ${d.hp}</span></div>`;
+    }
+    const d = UNITS[type], w = WEAPONS[d.weapon];
+    const strong = [], weak = [];
+    if (w) for (const [k, v] of Object.entries(ARMOR_MOD[w.type])) {
+      const can = k === 'air' ? w.air : w.ground;
+      if (!can || v <= 0.3) weak.push(CLS[k]); else if (v >= 0.9) strong.push(CLS[k]);
+    }
+    const threats = Object.entries(UNITS).filter(([, o]) => o.weapon && o.cost && ARMOR_MOD[WEAPONS[o.weapon].type][d.armor] >= 0.95 && (d.mt === 'air' ? WEAPONS[o.weapon].air : WEAPONS[o.weapon].ground)).map(([, o]) => o.name).slice(0, 4);
+    const tags = [`Bewegung ${d.move}`, `Sicht ${d.sight}`, `Panzerung: ${CLS[d.armor] || d.armor}`];
+    if (w) tags.push(`Waffe ${w.power} · Reichweite ${w.range[0] === w.range[1] ? w.range[0] : w.range.join('–')}`);
+    if (d.ammo) tags.push(`Munition ${d.ammo}`);
+    return `<div class="pi-desc">${d.desc}</div><div class="pi-tags">${tags.map((x) => `<span>${x}</span>`).join('')}</div>
+      ${w ? `<div class="pi-row good"><b>Stark gegen</b> ${strong.join(', ') || '—'}</div><div class="pi-row bad"><b>Schwach gegen</b> ${weak.join(', ') || '—'}</div>` : '<div class="pi-row"><b>Unbewaffnet</b></div>'}
+      ${threats.length ? `<div class="pi-row warn"><b>Gefährdet durch</b> ${threats.join(', ')}</div>` : ''}
+      ${w && w.noMoveFire ? '<div class="pi-row">Kann nicht ziehen und feuern in derselben Runde, kein Gegenschlag gegen ihn.</div>' : ''}`;
   }
 
   buildMenuHtml(b) {
@@ -842,19 +920,22 @@ export class Controller {
       title = b.producing ? `In Ausbildung: ${UNITS[b.producing].name}` : 'Ausbilden (fertig nächste Runde)';
       items = [{ kind: 'unit', t: 'schwester', d: UNITS.schwester, ok: g.canProduce(b, 'schwester'), missing: '', sub: `${g.unitCost(0, 'schwester')}` }];
     }
-    const cards = items.map((it) => `<button class="card ${it.ok ? '' : 'locked'}" data-a="${it.kind === 'bld' ? 'build' : 'prod'}" data-t="${it.t}" title="${it.missing || it.d.desc}">
+    const cards = items.map((it) => `<button class="card ${it.ok ? '' : 'locked'}" data-a="info" data-t="${it.kind}:${it.t}" title="${it.missing || it.d.desc}">
       <canvas data-icon="${it.kind === 'bld' ? 'bld' : 'unit'}:${it.t}"></canvas><span class="c-name">${it.d.name}</span><span class="c-cost">◈ ${it.sub}</span>${it.missing ? `<span class="c-lock">${it.missing}</span>` : ''}</button>`).join('');
     const cancel = b.producing ? '<button data-a="cancelprod" class="wide">Produktion abbrechen (Rückerstattung)</button>' : '';
-    return `<div class="p-title">${title}</div><div class="cards">${cards}</div>${cancel}`;
+    return `<div class="p-title">${title}</div><div class="cards">${cards}</div><div id="pinfo"><div class="pi-empty">Antippen für Details, Stärken und Schwächen</div></div>${cancel}`;
   }
 
   panelAction(a, t, e) {
     const g = this.g;
     if (this.busy && a !== 'close') return;
     if (a === 'close') { this.deselect(); return; }
+    if (a === 'expand') { this.expanded = !this.expanded; this.showPanel(e); return; }
+    if (a === 'info') { const [kind, type] = t.split(':'); this.infoSel = { kind, type }; this.showInfo(kind, type, e); return; }
     if (a === 'wait') { e.acted = true; e.moved = true; this.deselect(); this.refresh(); return; }
     if (a === 'auto') { e.auto = !e.auto; this.showPanel(e); return; }
     if (a === 'build') {
+      this.infoSel = null;
       const d = BUILDINGS[t];
       if (!g.bauhofReady(0) || !g.prereqOk(0, d) || g.players[0].credits < d.cost) { this.flash(g.players[0].credits < d.cost ? 'Zu wenig Credits' : 'Noch nicht verfügbar'); return; }
       this.clearHL(); this.mode = 'build'; this.buildType = t;
@@ -864,7 +945,7 @@ export class Controller {
       $('#panel').classList.remove('show');
       return;
     }
-    if (a === 'prod') { if (g.produce(e, t)) { this.flash(`${UNITS[t].name} in Auftrag gegeben`); this.refresh(); this.showPanel(e); } else this.flash('Produktion nicht möglich'); return; }
+    if (a === 'prod') { this.infoSel = null; if (g.produce(e, t)) { this.flash(`${UNITS[t].name} in Auftrag gegeben`); this.refresh(); this.showPanel(e); } else this.flash('Produktion nicht möglich'); return; }
     if (a === 'cancelprod') { g.cancelProduce(e); this.refresh(); this.showPanel(e); return; }
     if (a === 'voice') { this.mode = 'voice'; this.clearHL(); this.r.hl.sel = e; this.r.hl.target = g.voiceTargets(e).map((t) => [t.c, t.r]); this.flash('Ziel für die Stimme antippen'); return; }
     if (a === 'orbital') {

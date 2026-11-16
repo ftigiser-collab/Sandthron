@@ -115,7 +115,7 @@ export class Renderer {
     }
     ctx.stroke();
 
-    this.drawHighlights(ctx);
+    this.drawStormForecast(ctx);
     this.fx.drawDecals(ctx);
 
     this.drawWrecks(ctx, dt);
@@ -149,7 +149,10 @@ export class Renderer {
       const p = w.vis || center(w.c, w.r);
       const seen = g.wormSeen(w) || w.forceShow;
       if (w.surface > 0) drawWormMaw(ctx, p.x, p.y, this.t, w.surface);
-      else if (seen) drawWormSign(ctx, p.x, p.y, this.t, 1);
+      else if (seen) {
+        drawWormSign(ctx, p.x, p.y, this.t, 1);
+        if (w.vis && Math.random() < 0.7) { this.fx.dust(p.x, p.y, 2, '200,150,95', 30, 9); this.fx.add({ kind: 'debris', x: p.x + (Math.random() - 0.5) * 30, y: p.y, vx: (Math.random() - 0.5) * 40, vy: (Math.random() - 0.5) * 20, vz: 60 + Math.random() * 80, life: 0.8, size: 2.5, col: '214,168,104', a: 1 }); }
+      }
     }
 
     // Bodeneinheiten
@@ -167,6 +170,8 @@ export class Renderer {
 
     this.drawStorm(ctx);
     this.drawFog(ctx);
+    this.drawWind(ctx, dt);
+    this.drawHighlights(ctx);
 
     // Overlays nach dem Nebel
     for (const u of [...ground, ...air]) this.drawBadges(ctx, u);
@@ -208,6 +213,11 @@ export class Renderer {
       this.fx.add({ kind: 'puff', x: bx, y: by, vx: -Math.cos(u.facing) * 6, vy: -8, life: 1.1, size: 2.5, grow: 7, col: '70,66,62', a: 0.35, air: true });
     }
     if (u.harvestAnim > 0) u.harvestAnim = Math.max(0, u.harvestAnim - 0.004);
+    if (u.def.harvester && !u.anim && g.spiceAt(u.c, u.r) > 0 && Math.random() < 0.35) {
+      const fx = p.x + Math.cos(u.facing) * 24, fy = p.y + Math.sin(u.facing) * 24;
+      this.fx.add({ kind: 'puff', x: fx + (Math.random() - 0.5) * 14, y: fy, vx: 8 + Math.random() * 10, vy: -14 - Math.random() * 10, life: 2.2, size: 4, grow: 12, col: Math.random() < 0.5 ? '205,120,60' : '190,150,100', a: 0.3, air: true });
+      if (Math.random() < 0.3) this.fx.add({ kind: 'glow', x: fx, y: fy, vx: (Math.random() - 0.5) * 20, vy: -18, life: 0.9, size: 2.5, grow: 0, col: '255,160,70', a: 0.9 });
+    }
     if (u.stunned > 0) this.statusIcon(ctx, p.x, p.y - 26 - z, 'stun');
     if (u.shield > 0) this.statusIcon(ctx, p.x, p.y - z, 'shield');
   }
@@ -259,7 +269,7 @@ export class Renderer {
 
   lightTarget() {
     const ph = this.g.dayPhase ? this.g.dayPhase() : 'tag';
-    return { morgen: [255, 214, 184], tag: [255, 255, 255], abend: [255, 168, 120], nacht: [92, 108, 170] }[ph];
+    return { morgen: [255, 206, 172], tag: [255, 244, 226], abend: [255, 160, 112], nacht: [88, 102, 165] }[ph];
   }
 
   drawLighting(ctx, dt, bs, units) {
@@ -337,13 +347,7 @@ export class Renderer {
       if (fill) { ctx.fillStyle = fill; ctx.fill(); }
       if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = w; ctx.stroke(); }
     };
-    // Sturmvorhersage
-    if (g.storm) {
-      const n = g.storm.next;
-      ctx.setLineDash([6, 6]); ctx.lineDashOffset = -t * 20;
-      for (const [c, r] of ring(n.c, n.r, g.storm.rad, g.W, g.H)) fillHex(c, r, 'rgba(255,140,40,0.07)', 'rgba(255,150,60,0.45)', 1.5, R - 5);
-      ctx.setLineDash([]);
-    }
+
     if (hl.move) for (const n of hl.move.values()) if (n.end) fillHex(n.c, n.r, 'rgba(70,160,255,0.22)', 'rgba(120,200,255,0.55)', 1.5);
     for (const [c, r] of hl.build) fillHex(c, r, `rgba(90,230,120,${0.18 + 0.08 * Math.sin(t * 4)})`, 'rgba(120,255,150,0.7)', 1.5);
     for (const [c, r] of hl.drop) fillHex(c, r, 'rgba(90,230,230,0.2)', 'rgba(120,255,255,0.7)', 1.5);
@@ -351,6 +355,32 @@ export class Renderer {
     for (const e of hl.attack) fillHex(e.c, e.r, `rgba(255,60,40,${0.2 + 0.1 * Math.sin(t * 6)})`, 'rgba(255,90,70,0.95)', 2.5);
     if (hl.hover) fillHex(hl.hover.c, hl.hover.r, 'rgba(255,255,255,0.08)', 'rgba(255,255,255,0.5)', 1.5);
     if (hl.sel) { const p = this.posOf(hl.sel); ctx.beginPath(); hexPath(ctx, center(hl.sel.c, hl.sel.r).x, center(hl.sel.c, hl.sel.r).y, R - 2); ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 2.5; ctx.stroke(); }
+  }
+
+  drawStormForecast(ctx) {
+    const g = this.g; if (!g.storm) return;
+    const n = g.storm.next;
+    ctx.setLineDash([6, 6]); ctx.lineDashOffset = -this.t * 20;
+    for (const [c, r] of ring(n.c, n.r, g.storm.rad, g.W, g.H)) {
+      const p = center(c, r); ctx.beginPath(); hexPath(ctx, p.x, p.y, R - 5);
+      ctx.fillStyle = 'rgba(255,140,40,0.07)'; ctx.fill(); ctx.strokeStyle = 'rgba(255,150,60,0.45)'; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+    ctx.setLineDash([]);
+  }
+
+  // Wind: Sandschlieren über der Karte, Glutstaub in der Luft
+  drawWind(ctx, dt) {
+    const v = this.view;
+    if (!this.windP) this.windP = Array.from({ length: 90 }, () => ({ x: Math.random(), y: Math.random(), l: 20 + Math.random() * 60, s: 0.6 + Math.random(), a: 0.04 + Math.random() * 0.08 }));
+    const w = v.x1 - v.x0, h = v.y1 - v.y0;
+    ctx.lineCap = 'round';
+    for (const p of this.windP) {
+      p.x += dt * 0.05 * p.s; p.y += dt * 0.012 * p.s;
+      if (p.x > 1) { p.x -= 1; p.y = Math.random(); } if (p.y > 1) p.y -= 1;
+      const x = v.x0 + p.x * w, y = v.y0 + p.y * h;
+      ctx.strokeStyle = `rgba(235,200,150,${p.a})`; ctx.lineWidth = 1.2 + p.s;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.quadraticCurveTo(x - p.l * 0.5, y - 3, x - p.l, y - p.l * 0.2); ctx.stroke();
+    }
   }
 
   drawPath(ctx) {
