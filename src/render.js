@@ -463,7 +463,7 @@ export class Renderer {
       if (this.spiceLayer) { ctx.globalAlpha = 0.22 * a * (0.85 + 0.15 * Math.sin(this.t * 1.3)); ctx.drawImage(this.spiceLayer, 0, 0); ctx.globalAlpha = 1; }
       // Suchscheinwerfer auf Wachtürmen
       for (const b of bs) {
-        if (b.type !== 'turm' && b.type !== 'ausguck' && b.type !== 'flak') continue;
+        if (b.type !== 'turm' && b.type !== 'ausguck' && b.type !== 'flak' && b.type !== 'raketenturm') continue;
         const p = this.posOf(b), ang = this.t * 0.5 + b.id * 1.7;
         ctx.save(); ctx.translate(p.x, p.y - 8); ctx.rotate(ang);
         const sl = ctx.createLinearGradient(0, 0, 150, 0); sl.addColorStop(0, `rgba(225,235,255,${0.32 * a})`); sl.addColorStop(1, 'rgba(225,235,255,0)');

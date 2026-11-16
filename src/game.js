@@ -444,7 +444,9 @@ export class Game {
   }
   canProduce(b, type) {
     const def = UNITS[type], p = this.players[b.owner];
-    return this.active(b) && !b.producing && b.def.produces === def.cat && this.prereqOk(b.owner, def) && p.credits >= this.unitCost(b.owner, type) && !p.low;
+    const here = (b.def.producesTypes || []).includes(type) || (b.def.produces === def.cat && !def.refOnly && !def.noBuild);
+    if (type === 'erntetraeger' && this.units.filter((u) => !u.dead && u.owner === b.owner && u.def.harvOnly).length >= this.count(b.owner, 'raffinerie')) return false;
+    return this.active(b) && !b.producing && here && this.prereqOk(b.owner, def) && p.credits >= this.unitCost(b.owner, type) && !p.low;
   }
   produce(b, type) {
     if (!this.canProduce(b, type)) return false;
@@ -517,7 +519,7 @@ export class Game {
       if (b.sabotaged > 0) { b.sabotaged--; if (b.sabotaged > 0 || b.producing) { if (b.producing) this.say(`${b.def.name}: Produktion durch Sabotage verzögert`, 'warn', owner); continue; } }
       if (b.producing && b.turnsLeft <= 0) {
         const u = this.spawnNear(owner, b.producing, b.c, b.r);
-        if (u) { ev.push({ type: 'spawn', u: u.id, from: b.id }); this.say(`${u.def.name} bereit`, 'good', owner); b.producing = null; }
+        if (u) { if (u.def.harvOnly) u.docked = true; ev.push({ type: 'spawn', u: u.id, from: b.id }); this.say(`${u.def.name} bereit`, 'good', owner); b.producing = null; }
         else this.say(`${b.def.name}: kein Platz zum Ausrücken`, 'warn', owner);
       }
     }
@@ -984,13 +986,31 @@ export class Game {
         const last = steps[steps.length - 1] || { c: w.c, r: w.r };
         w.c = last.c; w.r = last.r;
         if (locked && last.c === best.c && last.r === best.r) {
-          // Notrettung: ein freier Träger reißt den bedrohten Ernter im letzten Moment aus dem Sand
-          if (best.def.harvester) { const rs = this.emergencyLift(best, w); if (rs) ev.push(rs); }
+          // Rettungsversuch in letzter Sekunde: nur ein Träger direkt am Ernter (höchstens 2 Felder)
+          let offer = null, failedCar = null;
+          const pre = [];
+          if (best.def.harvester) {
+            const car = this.nearCarrier(best, 2);
+            if (car) {
+              const chance = this.rescueChance(car, best, w);
+              if (best.owner === 0) offer = { car, chance };
+              else if (chance >= 0.5) {
+                if (this.rnd() < chance) { const rs = this.liftHarvester(best, car, w); if (rs) pre.push(rs); }
+                else failedCar = car;
+              }
+            }
+          }
           const hexes = this.wormBite(w, last.c, last.r);
-          const eaten = this.units.filter((u) => !u.dead && !u.carried && u.def.mt !== 'air' && hexes.some(([c, r]) => c === u.c && r === u.r));
+          const eaten = this.units.filter((u) => !u.dead && !u.carried && u.def.mt !== 'air' && hexes.some(([c, r]) => c === u.c && r === u.r) && !(offer && u === best));
+          if (failedCar) { failedCar.c = best.c; failedCar.r = best.r; eaten.push(failedCar); }
           for (const u of eaten) { this.kill(u); this.players[u.owner].stats.eaten++; }
           w.sated = WORM_SIZES[w.size || 1].sated; w.lock = null;
-          ev.push({ type: 'worm', id: w.id, path, eatMany: eaten.map((u) => u.id), eatHexes: hexes, owner: best.owner });
+          const wev = { type: 'worm', id: w.id, path, eatMany: eaten.map((u) => u.id), eatHexes: hexes, owner: best.owner };
+          if (offer) {
+            ev.push({ type: 'rescueOffer', h: best.id, car: offer.car.id, chance: offer.chance });
+            this.pendingRescue = { h: best, car: offer.car, w, chance: offer.chance, wev };
+          }
+          ev.push(...pre, wev);
           if (best.owner === 0 && eaten.includes(best)) this.say(`Ein Wurm hat euren ${best.def.name} verschlungen!`, 'bad');
           return ev;
         }
@@ -1018,10 +1038,29 @@ export class Game {
     return ev;
   }
 
-  emergencyLift(h, w) {
-    const car = this.units.filter((u) => !u.dead && u.owner === h.owner && u.def.carrier && u.auto && !u.carrying && !u.carried && distance(u.c, u.r, h.c, h.r) <= 12)
-      .sort((a, b) => distance(a.c, a.r, h.c, h.r) - distance(b.c, b.r, h.c, h.r))[0];
-    if (!car) return null;
+  nearCarrier(h, d) {
+    return this.units.filter((u) => !u.dead && u.owner === h.owner && u.def.carrier && !u.carrying && !u.carried && distance(u.c, u.r, h.c, h.r) <= d)
+      .sort((a, b) => distance(a.c, a.r, h.c, h.r) - distance(b.c, b.r, h.c, h.r))[0] || null;
+  }
+  rescueChance(car, h, w) {
+    const d = distance(car.c, car.r, h.c, h.r);
+    return Math.max(0.15, (d <= 1 ? 0.65 : 0.45) - ((w.size || 1) - 1) * 0.08);
+  }
+  // Entscheidung des Spielers über einen Rettungsversuch
+  resolveRescue(accept) {
+    const pr = this.pendingRescue; this.pendingRescue = null;
+    if (!pr) return [];
+    const { h, car, w, chance, wev } = pr;
+    if (h.dead) return [];
+    if (accept && !car.dead && this.rnd() < chance) { const rs = this.liftHarvester(h, car, w); if (rs) return [rs]; }
+    const lost = [h];
+    if (accept && !car.dead) { car.c = h.c; car.r = h.r; lost.push(car); }
+    for (const u of lost) { this.kill(u); this.players[u.owner].stats.eaten++; wev.eatMany = [...(wev.eatMany || []), u.id]; }
+    if (accept) this.say('Rettungsversuch gescheitert — Ernter und Träger verschlungen!', 'bad');
+    else this.say(`Ein Wurm hat euren ${h.def.name} verschlungen!`, 'bad');
+    return accept ? [{ type: 'rescueFail', h: h.id, car: car.id }] : [];
+  }
+  liftHarvester(h, car, w) {
     const refs = this.buildings.filter((b) => !b.dead && b.owner === h.owner && b.type === 'raffinerie' && b.turnsLeft <= 0);
     // Ziel: freies Feld an der Raffinerie, sonst nächster Fels abseits des Wurms
     let dest = null, bd = 1e9;

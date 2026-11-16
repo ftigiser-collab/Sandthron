@@ -177,6 +177,7 @@ const STAT = {
     }, { bevel: 0.9 });
   },
   flak(L, color) { STAT.turm(L, color); },
+  raketenturm(L, color) { STAT.turm(L, color); },
 };
 
 // Drehteile (vorgerendert, im Spiel rotiert)
@@ -184,6 +185,18 @@ function turretPart(kind, color) {
   if (kind === 'turm') return part(`tt-${color}`, 40, 24, (L) => {
     L((c) => { c.fillStyle = '#1e1b17'; c.fillRect(4, -2.6, 16, 5.2); c.fillStyle = '#2c2822'; c.fillRect(17, -3.2, 3.5, 6.4); }, { bevel: 0.4 });
     L((c) => { c.fillStyle = lg(c, -9, -8, 9, 8, '#d8ccb4', '#62584a'); rr(c, -9, -8, 16, 16, 3); c.fill(); vents(c, -7, -5, 4, 10, 4, true); c.fillStyle = color; c.fillRect(-9, -8, 2.4, 16); rivets(c, [[4, -6], [4, 6]], 0.6); }, { bevel: 0.8 });
+  });
+  if (kind === 'rak') return part(`tr-${color}`, 40, 28, (L) => {
+    // Raketenwerfer: zwei Behälter mit je drei Rohren, Mittelgelenk
+    L((c) => {
+      for (const sy of [-1, 1]) {
+        c.fillStyle = lg(c, -2, sy * 4, 14, sy * 10, '#cfc3aa', '#5a5244'); rr(c, -3, sy > 0 ? 3.2 : -10.2, 17, 7, 1.5); c.fill();
+        c.fillStyle = '#1a1714'; for (let k = 0; k < 3; k++) { c.beginPath(); c.arc(13, (sy > 0 ? 4.6 : -8.8) + k * 2.1, 0.9, 0, 6.28); c.fill(); }
+        c.fillStyle = color; c.fillRect(-3, sy > 0 ? 3.2 : -10.2, 2, 7);
+        hazard(c, 6, sy > 0 ? 8.6 : -10.2, 5, 1.6);
+      }
+    }, { bevel: 0.6 });
+    L((c) => { c.fillStyle = rg(c, -2, -2, 1, 7, '#d8ccb4', '#62584a'); c.beginPath(); c.arc(0, 0, 5.5, 0, 6.28); c.fill(); rivets(c, [[2.5, -2.5], [2.5, 2.5], [-3, 0]], 0.5); }, { bevel: 0.8 });
   });
   return part(`tf-${color}`, 40, 24, (L) => {
     L((c) => { c.fillStyle = '#1e1b17'; c.fillRect(2, -5.2, 17, 3); c.fillRect(2, 2.2, 17, 3); }, { bevel: 0.3 });
@@ -255,6 +268,10 @@ const DYN = {
   turm(c, b, color, t, o) {
     const p = turretPart('turm', color);
     c.save(); c.rotate(b.facing); c.translate(-(o.recoil || 0) * 3, 0); drawPartShadow(c, p, 2, 2, 0.3); drawPart(c, p, 6, 0); c.restore();
+  },
+  raketenturm(c, b, color, t, o) {
+    const p = turretPart('rak', color);
+    c.save(); c.rotate(b.facing); c.translate(-(o.recoil || 0) * 2, 0); drawPartShadow(c, p, 2, 2, 0.3); drawPart(c, p, 5, 0); c.restore();
   },
   flak(c, b, color, t, o) {
     const p = turretPart('flak', color);

@@ -315,6 +315,13 @@ export class Controller {
       } else if (ev.type === 'orbital') await this.animOrbital(ev);
       else if (ev.type === 'endgame') await this.animEndgame(ev);
       else if (ev.type === 'rescue') await this.animRescue(ev);
+      else if (ev.type === 'rescueOffer') {
+        const accept = await this.askRescue(ev);
+        for (const e2 of g.resolveRescue(accept)) {
+          if (e2.type === 'rescue') await this.animRescue(e2);
+          else if (e2.type === 'rescueFail') { const h = g.get(e2.h); if (h) { const p = center(h.c, h.r); this.r.float(p.x, p.y - 40, 'Rettung gescheitert!', '#ff7050', true); } }
+        }
+      }
       else if (ev.type === 'strike') await this.animStrike(ev);
       else if (ev.type === 'card') { if (ev.owner === 0) { this.pulse('#cardsbtn'); this.refresh(); } }
       else if (ev.type === 'income') {
@@ -722,6 +729,23 @@ export class Controller {
       u.z = undefined;
     }
     if (u.owner === 0) { g.updateVision(); this.r.fogDirty = true; }
+  }
+
+  // Abfrage: Rettungsversuch in letzter Sekunde
+  askRescue(ev) {
+    const g = this.g, h = g.get(ev.h), car = g.get(ev.car);
+    if (h) { const p = center(h.c, h.r); this.r.centerOn(p.x, p.y); }
+    return new Promise((resolve) => {
+      let box = document.getElementById('confirmbox');
+      if (!box) { box = document.createElement('div'); box.id = 'confirmbox'; document.getElementById('app').appendChild(box); }
+      box.innerHTML = `<div class="cb-card"><div class="cb-title">Der Wurm greift euren Ernter an!</div>
+        <div class="cb-text">${car ? car.def.name : 'Ein Träger'} ist direkt daneben. Rettungsversuch in letzter Sekunde?<br><b style="color:#ffcf8a">Erfolgschance ${Math.round(ev.chance * 100)} %</b><br>Misslingt er, verschlingt der Wurm Ernter <i>und</i> Träger. Beide lassen sich in der Raffinerie nachbauen.</div>
+        <div class="cb-btns"><button data-a="no">Aufgeben</button><button class="primary" data-a="yes">Retten!</button></div></div>`;
+      box.classList.add('show');
+      box.onclick = null;
+      box.querySelector('[data-a="yes"]').onclick = () => { box.classList.remove('show'); resolve(true); };
+      box.querySelector('[data-a="no"]').onclick = () => { box.classList.remove('show'); resolve(false); };
+    });
   }
 
   // Notrettung: Träger stürzt heran, packt den Ernter und fliegt ihn auf Fels
@@ -1177,9 +1201,19 @@ export class Controller {
     $('#round').textContent = g.round;
     const ph = g.dayPhase(); const tz = $('#daytime'); if (tz) { tz.textContent = { morgen: 'Morgen', tag: 'Tag', abend: 'Abend', nacht: 'Nacht' }[ph]; tz.parentElement.classList.toggle('night', ph === 'nacht'); }
     $('#credits').textContent = Math.floor(p.credits).toLocaleString('de-DE');
-    const pw = $('#power');
-    pw.textContent = `${p.powerProd - p.powerUse >= 0 ? '+' : ''}${p.powerProd - p.powerUse}`;
+    const pw = $('#power'), surplus = p.powerProd - p.powerUse;
+    pw.textContent = `${surplus >= 0 ? '+' : ''}${surplus}`;
     pw.parentElement.classList.toggle('low', p.low);
+    // Balken: Füllung = Verbrauch im Verhältnis zur Erzeugung; grün mit Reserve, gelb knapp, rot bei Mangel
+    const bar = $('#pwbar');
+    if (bar) {
+      const ratio = p.powerProd > 0 ? p.powerUse / p.powerProd : (p.powerUse > 0 ? 2 : 0);
+      const col = p.low || surplus < 0 ? '#ff5a45' : ratio > 0.8 ? '#f2c94c' : '#6fdc6a';
+      const fill = bar.querySelector('i');
+      fill.style.width = `${Math.min(100, ratio * 100)}%`; fill.style.background = col;
+      bar.title = `Erzeugung ${p.powerProd} · Verbrauch ${p.powerUse}`;
+      bar.classList.toggle('over', ratio > 1);
+    }
     const left = g.ownUnits(0).filter((u) => !u.acted && !u.carried && !u.moved && !(u.def.harvester && u.auto)).length;
     $('#nextunit').textContent = left ? `Nächste Einheit (${left})` : 'Nächste Einheit';
     const ob = $('#objectives');
@@ -1418,10 +1452,11 @@ export class Controller {
         const missing = pre ? '' : 'Benötigt: ' + d.prereq.filter((x) => !g.has(0, x)).map((x) => BUILDINGS[x].name).join(', ');
         items.push({ kind: 'bld', t, d, ok: ready && pre && money, missing, sub: `${d.cost} · ${d.turns} ${d.turns === 1 ? 'Runde' : 'Runden'}` });
       }
-    } else if (b.def.produces) {
+    } else if (b.def.produces || b.def.producesTypes) {
       title = b.producing ? `In Produktion: ${UNITS[b.producing].name}` : p.low ? 'Energie zu niedrig für Produktion' : 'Produzieren (fertig nächste Runde)';
       for (const [t, d] of Object.entries(UNITS)) {
-        if (d.cat !== b.def.produces || d.noBuild) continue;
+        const here = (b.def.producesTypes || []).includes(t) || (d.cat === b.def.produces && !d.noBuild && !d.refOnly);
+        if (!here) continue;
         if (d.faction && d.faction !== p.faction) continue;
         const pre = g.prereqOk(0, d);
         const missing = pre ? '' : 'Benötigt: ' + d.prereq.filter((x) => !g.has(0, x)).map((x) => BUILDINGS[x].name).join(', ');

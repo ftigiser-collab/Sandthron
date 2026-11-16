@@ -3,7 +3,7 @@ import { UNITS, BUILDINGS, CARDS, DROPS, ORBITAL_STRIKE, ENDGAME_ROUND } from '.
 import { ring } from './hex.js';
 import { distance, neighbors } from './hex.js';
 
-const PLAN = ['windfalle', 'raffinerie', 'kaserne', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'horst', 'ausguck', 'windfalle', 'kontor', 'konvent', 'turm', 'windfalle', 'felsenhort', 'flak', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'turm', 'flak', 'windfalle'];
+const PLAN = ['windfalle', 'raffinerie', 'kaserne', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'horst', 'ausguck', 'windfalle', 'kontor', 'raketenturm', 'konvent', 'turm', 'windfalle', 'felsenhort', 'flak', 'windfalle', 'fabrik', 'raketenturm', 'raffinerie', 'turm', 'flak', 'windfalle', 'raketenturm'];
 
 function value(g, e) {
   if (e.isBuilding) return e.type === 'bauhof' ? 2500 : e.def.weapon ? 900 : e.def.cost * 0.6;
@@ -355,14 +355,15 @@ export function aiProduce(g, owner) {
   const refs = g.count(owner, 'raffinerie');
   const reserve = g.round > 3 ? 250 : 0;
   for (const b of g.buildings) {
-    if (b.dead || b.owner !== owner || !b.def.produces || b.producing || b.turnsLeft > 0) continue;
+    if (b.dead || b.owner !== owner || !(b.def.produces || b.def.producesTypes) || b.producing || b.turnsLeft > 0) continue;
     let opts = [];
-    if (b.def.produces === 'veh') {
-      if (refs && harvesters < Math.min(4, refs * 2) && g.prereqOk(owner, UNITS.ernter)) opts = [['ernter', 10]];
-      else {
-        const foeAir = g.units.filter((u) => !u.dead && u.owner !== owner && u.def.mt === 'air').length;
-        opts = [['panzer', 4], ['trike', 1], ['werfer', 2], ['laserpanzer', 2], ['koloss', 1], ['brenner', 3], ['flakwagen', foeAir ? 3 : 0]];
-      }
+    if (b.type === 'raffinerie') {
+      const cars = g.ownUnits(owner).filter((u) => u.def.harvOnly).length;
+      if (cars < refs) opts = [['erntetraeger', 10]];
+      else if (harvesters < Math.min(4, refs * 2)) opts = [['ernter', 10]];
+    } else if (b.def.produces === 'veh') {
+      const foeAir = g.units.filter((u) => !u.dead && u.owner !== owner && u.def.mt === 'air').length;
+      opts = [['panzer', 4], ['trike', 1], ['werfer', 2], ['laserpanzer', 2], ['koloss', 1], ['brenner', 3], ['flakwagen', foeAir ? 3 : 0]];
     } else if (b.def.produces === 'sv') {
       const n = (t) => g.ownUnits(owner).filter((u) => u.type === t).length;
       opts = [['duenen', 3], ['todes', 2], ['wurmreiter', n('wurmreiter') < 1 ? 2 : 0]];
@@ -383,7 +384,7 @@ export function aiProduce(g, owner) {
       opts = carriers < 1 && harvesters >= 2 ? [['traeger', 10]] : [['falke', 3], ['libelle', 1], ['bomber', 2], ['adler', 3], ['jaeger', foeAir ? 3 : 0]];
     } else if (b.def.produces === 'sis') opts = [['schwester', g.ownUnits(owner).filter((u) => u.type === 'schwester').length < 2 ? 2 : 0], ['spion', g.ownUnits(owner).filter((u) => u.type === 'spion').length < 1 ? 2 : 0]];
     opts = opts.filter(([, w]) => w > 0);
-    opts = opts.filter(([t]) => UNITS[t] && g.prereqOk(owner, UNITS[t]) && p.credits >= g.unitCost(owner, t) + (t === 'ernter' ? 0 : reserve));
+    opts = opts.filter(([t]) => UNITS[t] && g.prereqOk(owner, UNITS[t]) && p.credits >= g.unitCost(owner, t) + (t === 'ernter' || t === 'erntetraeger' ? 0 : reserve));
     if (!opts.length) continue;
     const tot = opts.reduce((a, o) => a + o[1], 0);
     let x = g.rnd() * tot, pick = opts[0][0];
