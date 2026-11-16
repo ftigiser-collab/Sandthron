@@ -325,19 +325,25 @@ function thopterArt(ctx, u, color, t, o, kind) {
   const z = o.z ?? 26, sc = def.scale, bank = o.bank || 0;
   // Viele kleine Flügel: je Wurzel ein Fächer aus drei schmalen Flügeln, jeder mit eigenem Takt
   const wl = wingList(def);
-  // Starrer Flügelschlag: Blätter behalten ihre Länge und schwingen um die Nabe vor und zurück
+  // Vertikaler Flügelschlag: das starre Blatt kippt um die Längsachse. Von oben: die Spitze wandert
+  // auf dem Bildschirm nach oben (zur Kamera) bzw. nach unten, die Projektion verkürzt sich, Licht wechselt.
   const PH = (w, side) => t * def.rate * w.rate + u.id + w.off + (side > 0 ? 0.9 : 0);
-  const swing = (w, side, dp = 0) => o.landed ? 0.95 : Math.sin(PH(w, side) - dp) * 0.42;
-  const fl = () => 1;
+  const theta = (w, side, dp = 0) => o.landed ? 0 : Math.sin(PH(w, side) - dp) * 0.95;
+  const fa = u.facing || 0, upX = -Math.sin(fa), upY = -Math.cos(fa); // Bildschirm-oben im Rumpfsystem
+  const tipOf = (w, side, th, lean) => {
+    const sw = o.landed ? w.sw + 0.95 : w.sw, L = w.len * lean;
+    const dx = -Math.sin(sw), dy = side * Math.cos(sw);
+    const k = Math.cos(th), h = Math.sin(th) * L * 0.75 / sc;
+    return [w.x + dx * L * k + upX * h, side * w.y + dy * L * k + upY * h];
+  };
   const drawWings = (alpha) => {
     for (const side of [-1, 1]) {
       const lean = 1 - side * bank * 0.3;
       for (const w of wl) {
-        // Bewegungsunschärfe: das starre Blatt an früheren Schlagwinkeln, blass
-        if (!o.landed) for (const dp of [0.35, 0.7, 1.05]) c2(ctx, () => { ctx.translate(w.x, side * w.y); angWing(ctx, side, w.len * lean, w.chord, 1, w.sw + swing(w, side, dp), alpha * (1.2 - dp), true); });
-        // Licht auf dem Blatt wechselt mit der Neigung
-        const tilt = o.landed ? 1 : 0.82 + 0.18 * Math.cos(PH(w, side));
-        c2(ctx, () => { ctx.translate(w.x, side * w.y); angWing(ctx, side, w.len * lean, w.chord, 1, w.sw + swing(w, side), alpha * tilt); });
+        const root = [w.x, side * w.y];
+        if (!o.landed) for (const dp of [0.32, 0.64, 0.96]) blade(ctx, root, tipOf(w, side, theta(w, side, dp), lean), w.chord, alpha * (0.95 - dp * 0.7), 0.5, true);
+        const th = theta(w, side);
+        blade(ctx, root, tipOf(w, side, th, lean), w.chord, alpha, 0.5 + th * 0.45, false);
       }
       // Flügelnaben
       for (const [x, rootY] of def.wings) { ctx.fillStyle = '#3a3630'; ctx.beginPath(); ctx.arc(x, side * rootY, 1.4, 0, 6.28); ctx.fill(); ctx.fillStyle = '#8a8478'; ctx.beginPath(); ctx.arc(x - 0.3, side * rootY - 0.3, 0.7, 0, 6.28); ctx.fill(); }
@@ -348,7 +354,7 @@ function thopterArt(ctx, u, color, t, o, kind) {
   ctx.globalAlpha *= Math.max(0.1, 0.3 - z * 0.003);
   ctx.drawImage(p.sh, -p.w / 2, -p.h / 2, p.w, p.h);
   ctx.globalCompositeOperation = 'source-over'; ctx.filter = 'none';
-  const sa = ctx.globalAlpha; ctx.globalAlpha = sa * 0.6; drawWingsShadow(ctx, wl, swing); ctx.globalAlpha = sa;
+  const sa = ctx.globalAlpha; ctx.globalAlpha = sa * 0.6; drawWingsShadow(ctx, wl, theta, o.landed); ctx.globalAlpha = sa;
   ctx.restore();
   // Maschine
   ctx.save(); ctx.translate(0, -z); ctx.rotate(u.facing); ctx.scale(sc, sc);
@@ -378,14 +384,32 @@ function wingList(def) {
   WL.set(def, out);
   return out;
 }
-function drawWingsShadow(ctx, wl, swing) {
+function drawWingsShadow(ctx, wl, theta, landed) {
   ctx.fillStyle = '#000';
   for (const side of [-1, 1]) for (const w of wl) {
-    const L = w.len;
-    ctx.save(); ctx.translate(w.x, side * w.y); ctx.rotate(side * (w.sw + swing(w, side)));
-    ctx.beginPath(); ctx.moveTo(-w.chord * 0.4, 0); ctx.lineTo(-w.chord * 0.45, side * L); ctx.lineTo(w.chord * 0.4, side * L * 0.93); ctx.lineTo(w.chord * 0.4, 0); ctx.closePath(); ctx.fill();
-    ctx.restore();
+    const sw = landed ? w.sw + 0.95 : w.sw, L = w.len * Math.cos(theta(w, side));
+    const dx = -Math.sin(sw), dy = side * Math.cos(sw), nx = -dy, ny = dx, hw = w.chord * 0.42;
+    const x0 = w.x, y0 = side * w.y, x1 = x0 + dx * L, y1 = y0 + dy * L;
+    ctx.beginPath(); ctx.moveTo(x0 + nx * hw, y0 + ny * hw); ctx.lineTo(x1 + nx * hw * 0.8, y1 + ny * hw * 0.8); ctx.lineTo(x1 - nx * hw * 0.8, y1 - ny * hw * 0.8); ctx.lineTo(x0 - nx * hw, y0 - ny * hw); ctx.closePath(); ctx.fill();
   }
+}
+// Starres Metallblatt zwischen Nabe und Spitze; light 0..1 (oben hell, unten dunkel)
+function blade(c, [x0, y0], [x1, y1], chord, alpha, light, ghost) {
+  const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, nx = -uy, ny = ux, hw = chord * 0.45;
+  const P = [[x0 + nx * hw, y0 + ny * hw], [x0 + ux * L * 0.15 + nx * hw * 1.15, y0 + uy * L * 0.15 + ny * hw * 1.15], [x1 + nx * hw * 0.85 - ux * 1, y1 + ny * hw * 0.85 - uy * 1], [x1, y1], [x1 - nx * hw * 0.8, y1 - ny * hw * 0.8], [x0 - nx * hw, y0 - ny * hw]];
+  c.beginPath(); P.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath();
+  if (ghost) { c.fillStyle = `rgba(160,155,144,${0.2 * alpha})`; c.fill(); return; }
+  const l = Math.max(0, Math.min(1, light));
+  const a = (v) => Math.round(v);
+  const g = c.createLinearGradient(x0 + nx * hw, y0 + ny * hw, x0 - nx * hw, y0 - ny * hw);
+  g.addColorStop(0, `rgba(${a(120 + 110 * l)},${a(116 + 106 * l)},${a(106 + 98 * l)},${alpha})`);
+  g.addColorStop(1, `rgba(${a(70 + 80 * l)},${a(66 + 76 * l)},${a(60 + 70 * l)},${alpha})`);
+  c.fillStyle = g; c.fill();
+  c.strokeStyle = `rgba(40,38,34,${0.7 * alpha})`; c.lineWidth = 0.45; c.stroke();
+  c.strokeStyle = `rgba(40,38,34,${0.45 * alpha})`; c.beginPath();
+  for (let k = 1; k <= 3; k++) { const f = k / 4; c.moveTo(x0 + ux * L * f + nx * hw, y0 + uy * L * f + ny * hw); c.lineTo(x0 + ux * L * f - nx * hw, y0 + uy * L * f - ny * hw); }
+  c.stroke();
+  c.strokeStyle = `rgba(240,234,220,${0.4 * alpha * (0.4 + l)})`; c.lineWidth = 0.35; c.beginPath(); c.moveTo(x0 + nx * hw * 0.3, y0 + ny * hw * 0.3); c.lineTo(x1 + nx * hw * 0.25, y1 + ny * hw * 0.25); c.stroke();
 }
 
 // ---------- Zeichenfunktionen (Signatur wie DRAW in sprites.js) ----------
