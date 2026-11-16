@@ -1,5 +1,7 @@
 // Prozedurale Grafik: Einheiten, Gebäude, Würmer (Draufsicht, Licht von oben links)
 import { shade, rgba } from './util.js';
+import { VDRAW } from './vart.js';
+import { hasArt, drawBuildingArt } from './bart.js';
 
 const M = { dark: '#3a3128', mid: '#6d604c', light: '#a4927a', hi: '#d3c4a6', sand: '#8a7354', glass: '#8fd0f0' };
 
@@ -386,6 +388,7 @@ const DRAW = {
 };
 
 let BANK = 0;
+Object.assign(DRAW, VDRAW);
 function wings(ctx, x, y, len, wid, a, flap, alpha = 1) {
   for (const s of [-1, 1]) {
     ctx.save(); ctx.translate(x, y); ctx.rotate(s * a);
@@ -516,6 +519,11 @@ function dome(ctx, x, y, r, col, glow) {
 export function drawBuilding(ctx, b, x, y, color, t, o = {}) {
   ctx.save(); ctx.translate(x, y);
   const rise = b.rise ?? 1;
+  if (b.turnsLeft <= 0 && hasArt(b.type)) {
+    ctx.scale((0.8 + 0.2 * rise) * 1.12, (0.8 + 0.2 * rise) * 1.12);
+    drawBuildingArt(ctx, b, color, t, o);
+    ctx.restore(); return;
+  }
   foundation(ctx, 33, color);
   if (b.turnsLeft > 0) {
     // Baustelle
