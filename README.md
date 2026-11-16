@@ -24,8 +24,11 @@ Rundenstrategie auf Hexfeldern, angelehnt an Dune 2000 und das Dune-Brettspiel, 
 - Autosave und Fortsetzen
 - KI nutzt Karten, Drops und die neuen Einheiten
 
+## Stufe 3 (in Arbeit)
+- Kampagne „Der Sand von Askar“ mit 5 Missionen, Briefings, Zielen und Fortschritt
+- Wurmgrößen, Sandgänger mit Klopfern, Balancing der Wirtschaft
+
 ## Geplant
-- **Stufe 3:** Kampagne mit Missionen und Briefings, Balancing
 - **Später:** Sound und Musik
 
 ## Technik

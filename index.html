@@ -33,6 +33,7 @@
   <div id="zoom"><button id="zoomin">+</button><button id="zoomout">−</button></div>
   <div id="seedinfo"></div>
   <div id="log"></div>
+  <div id="objectives"></div>
   <aside id="panel"></aside>
 
   <div id="forecast">
@@ -87,8 +88,10 @@
   <div id="endscreen">
     <h1>Ende</h1>
     <div class="stats"></div>
-    <button class="primary" onclick="location.reload()">Neues Spiel</button>
+    <div class="ebtns"><button class="primary" onclick="location.reload()">Neues Spiel</button></div>
   </div>
+
+  <div id="campaign"></div>
 
   <div id="menu">
     <div class="m-box">
@@ -109,7 +112,8 @@
       </div>
       <div class="m-label">Karte (optional)</div>
       <input id="seed" placeholder="Zufällig — oder Zahl/Wort eingeben" autocomplete="off">
-      <button id="start" class="primary big">Neues Spiel</button>
+      <button id="campaignbtn" class="primary big">Kampagne</button>
+      <button id="start" class="big">Freies Gefecht</button>
       <button id="continue" class="big" style="display:none">Fortsetzen</button>
       <div class="loading">Die Wüste entsteht …</div>
       <div class="m-ver">Stufe 2 · Prototyp</div>

@@ -124,7 +124,7 @@ export async function aiTurn(g, act, owner = 1) {
   const enemy = 1 - owner;
   aiBuild(g, owner);
   aiProduce(g, owner);
-  await aiCards(g, act, owner);
+  if (!g.aiPassive) await aiCards(g, act, owner);
 
   const mine = g.ownUnits(owner);
   const myB = g.buildings.filter((b) => !b.dead && b.owner === owner);
@@ -137,11 +137,12 @@ export async function aiTurn(g, act, owner = 1) {
   const wave = diff.wave + Math.floor(g.round / 6);
   let mode = threats.length ? 'defend' : (army.length >= wave && g.round >= diff.firstAttack) ? 'attack' : 'gather';
   if (g.aiMode === 'attack' && army.length >= Math.max(2, wave * 0.4) && !threats.length) mode = 'attack';
+  if (g.aiPassive) mode = threats.length ? 'defend' : 'gather';
   g.aiMode = mode;
   const enemyHome = g.map.starts[enemy];
   const stage = home ? stagingHex(g, home, enemyHome) : null;
 
-  aiDrop(g, owner, mode, enemyB);
+  if (!g.aiPassive) aiDrop(g, owner, mode, enemyB);
   const order = [...army].sort((a, b) => (g.weapon(b).range[1] - g.weapon(a).range[1]));
   for (const u of order) {
     if (u.dead || u.acted || u.moved || g.state !== 'play') continue;
@@ -282,9 +283,16 @@ export function aiProduce(g, owner) {
     if (b.dead || b.owner !== owner || !b.def.produces || b.producing || b.turnsLeft > 0) continue;
     let opts = [];
     if (b.def.produces === 'veh') {
-      if (refs && harvesters < Math.min(4, refs + 1) && g.prereqOk(owner, UNITS.ernter)) opts = [['ernter', 10]];
+      if (refs && harvesters < Math.min(4, refs * 2) && g.prereqOk(owner, UNITS.ernter)) opts = [['ernter', 10]];
       else opts = [['panzer', 5], ['trike', 2], ['werfer', 2]];
-    } else if (b.def.produces === 'inf') opts = [['inf', 3], ['rak', 2], ['sandgaenger', g.ownUnits(owner).filter((u) => u.type === 'sandgaenger').length < 2 ? 1 : 0]];
+    } else if (b.def.produces === 'inf') {
+      const infN = g.ownUnits(owner).filter((u) => u.def.cat === 'inf').length;
+      const hasFab = g.has(owner, 'fabrik', false);
+      const threatened = g.units.some((e) => !e.dead && e.owner !== owner && g.buildings.some((bb) => !bb.dead && bb.owner === owner && distance(bb.c, bb.r, e.c, e.r) <= 5));
+      // Sparen für das Fahrzeugwerk, Infanterie begrenzen
+      if (!threatened && ((!hasFab && p.credits < 1900) || infN >= 7 || (hasFab && g.rnd() < 0.5))) opts = [];
+      else opts = [['inf', 3], ['rak', 2], ['sandgaenger', g.ownUnits(owner).filter((u) => u.type === 'sandgaenger').length < 2 ? 1 : 0]];
+    }
     else if (b.def.produces === 'air') {
       const foeAir = g.units.filter((u) => !u.dead && u.owner !== owner && u.def.mt === 'air').length;
       const carriers = g.ownUnits(owner).filter((u) => u.def.carrier).length;

@@ -69,8 +69,8 @@ export const UNITS = {
              desc: 'Rückgrat jeder Armee.' },
   werfer:  { name: 'Raketenwerfer', cat: 'veh', move: 3, mt: 'track', sight: 2, armor: 'light', weapon: 'artillery', cost: 900, prereq: ['fabrik', 'ausguck'], vib: 2,
              desc: 'Reichweite 2–4. Kann nicht ziehen und feuern in derselben Runde.' },
-  ernter:  { name: 'Ernter', cat: 'veh', move: 3, mt: 'track', sight: 2, armor: 'heavy', cost: 1000, prereq: ['fabrik', 'raffinerie'], vib: 4, harvester: true, capacity: 525, rate: 175,
-             desc: 'Erntet bis zu 175 Glut pro Runde, fasst 525. Lockt Würmer stark an.' },
+  ernter:  { name: 'Ernter', cat: 'veh', move: 4, mt: 'track', sight: 2, armor: 'heavy', cost: 800, prereq: ['fabrik', 'raffinerie'], vib: 4, harvester: true, capacity: 750, rate: 250,
+             desc: 'Erntet bis zu 250 Glut pro Runde, fasst 750. Lockt Würmer stark an.' },
   libelle: { name: 'Späh-Thopter', cat: 'air', move: 9, mt: 'air', sight: 4, armor: 'air', weapon: 'tmg', cost: 600, prereq: ['horst', 'ausguck'],
              desc: 'Weitsicht und Bordkanone. Jagt Infanterie und andere Thopter.' },
   falke:   { name: 'Kampf-Thopter', cat: 'air', move: 7, mt: 'air', sight: 3, armor: 'air', weapon: 'trocket', ammo: 3, cost: 1100, prereq: ['horst', 'ausguck'],
@@ -89,11 +89,11 @@ export const UNITS = {
 
 export const BUILDINGS = {
   bauhof:     { name: 'Bauhof', hp: 300, power: 10, cost: 3000, turns: 0, sight: 3, buildable: false,
-                desc: 'Herz der Basis. Errichtet ein Gebäude pro Runde und bringt 100 Credits Grundeinkommen.' },
+                desc: 'Herz der Basis. Errichtet ein Gebäude pro Runde und bringt 150 Credits Grundeinkommen.' },
   windfalle:  { name: 'Windfalle', cat: 'bld', hp: 150, power: 100, cost: 300, turns: 1, sight: 2, prereq: ['bauhof'],
                 desc: 'Gewinnt Energie aus Wind und Luftfeuchte.' },
   raffinerie: { name: 'Raffinerie', cat: 'bld', hp: 220, power: -30, cost: 1400, turns: 2, sight: 2, prereq: ['windfalle'], freeUnit: 'ernter',
-                desc: 'Ernter laden hier ab. Mit einem Ernter.' },
+                desc: 'Ernter laden hier ab. Mit einem Ernter, bringt 50 Credits pro Runde. Die Erschütterungen der Basis halten Würmer auf 2 Felder Abstand.' },
   kaserne:    { name: 'Kaserne', cat: 'bld', hp: 180, power: -20, cost: 300, turns: 1, sight: 2, prereq: ['windfalle'], produces: 'inf',
                 desc: 'Bildet eine Infanterieeinheit pro Runde aus.' },
   fabrik:     { name: 'Fahrzeugwerk', cat: 'bld', hp: 260, power: -30, cost: 1500, turns: 2, sight: 2, prereq: ['raffinerie'], produces: 'veh',
@@ -113,9 +113,9 @@ export const BUILDINGS = {
 };
 
 export const WORM_SIZES = {
-  1: { name: 'Sandwurm', steps: 5, sated: 1, weight: 60, scale: 1 },
-  2: { name: 'Großer Wurm', steps: 6, sated: 1, weight: 30, scale: 1.4 },
-  3: { name: 'Uralter Wurm', steps: 7, sated: 2, weight: 10, scale: 1.9 },
+  1: { name: 'Sandwurm', steps: 4, sated: 2, weight: 60, scale: 1 },
+  2: { name: 'Großer Wurm', steps: 5, sated: 2, weight: 30, scale: 1.4 },
+  3: { name: 'Uralter Wurm', steps: 6, sated: 3, weight: 10, scale: 1.9 },
 };
 
 export const DIFFICULTY = {

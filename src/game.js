@@ -30,7 +30,7 @@ export class Game {
   }
   mkPlayer(id, faction) {
     return { id, faction, name: FACTIONS[faction].name, color: FACTIONS[faction].color, perk: FACTIONS[faction].perk || {}, credits: START_CREDITS, incomeMult: 1, powerProd: 0, powerUse: 0, low: false,
-      cards: [], cardRound: 0, cardTimer: 0, freeDrop: false, dropCd: 0, pendingDrops: [], stats: { kills: 0, lost: 0, harvested: 0 } };
+      cards: [], cardRound: 0, cardTimer: 0, freeDrop: false, dropCd: 0, pendingDrops: [], stats: { kills: 0, lost: 0, harvested: 0, eaten: 0, lostTypes: {} } };
   }
 
   // ---------- Fraktionsboni ----------
@@ -61,7 +61,7 @@ export class Game {
     // Sturm weit weg von den Basen beginnen
     this.storm = { c: Math.round(this.W / 2), r: 1, rad: 2, dir: 5 };
     this.storm.next = this.stormStep(this.storm);
-    this.spawnWorm(); this.spawnWorm(); this.spawnWorm();
+    this.spawnWorm(); this.spawnWorm();
     this.updatePower();
     this.updateVision();
   }
@@ -331,6 +331,8 @@ export class Game {
     e.dead = true; e.hp = 0;
     if (by) this.players[by.owner].stats.kills++;
     this.players[e.owner].stats.lost++;
+    const lt = this.players[e.owner].stats.lostTypes || (this.players[e.owner].stats.lostTypes = {});
+    lt[e.type] = (lt[e.type] || 0) + 1;
     if (e.isUnit) {
       const c = this.get(e.carrying); if (c) this.kill(c, by);
       if (e.def.harvester && e.cargo > 0 && this.isSand(e.c, e.r)) this.map.spice[this.i(e.c, e.r)] += e.cargo;
@@ -391,7 +393,12 @@ export class Game {
   beginTurn(owner) {
     const ev = [];
     this.current = owner;
-    if (this.round > 1) for (const b of this.buildings) if (!b.dead && b.owner === owner && b.type === 'bauhof') { const amt = Math.round(100 * this.players[owner].incomeMult); this.players[owner].credits += amt; ev.push({ type: 'income', amount: amt, owner }); }
+    if (this.round > 1) {
+      let amt = 0;
+      for (const b of this.buildings) if (!b.dead && b.owner === owner && b.turnsLeft <= 0) amt += b.type === 'bauhof' ? 150 : b.type === 'raffinerie' ? 50 : 0;
+      amt = Math.round(amt * this.players[owner].incomeMult);
+      if (amt) { this.players[owner].credits += amt; ev.push({ type: 'income', amount: amt, owner }); }
+    }
     for (const b of this.buildings) {
       if (b.dead || b.owner !== owner) continue;
       b.acted = false;
@@ -676,7 +683,7 @@ export class Game {
 
   wormTurn(w) {
     const ev = [];
-    const sandPass = (c, r) => this.isSand(c, r) && !this.buildingAt(c, r);
+    const sandPass = (c, r) => this.isSand(c, r) && !this.buildings.some((b) => !b.dead && distance(b.c, b.r, c, r) <= 2);
     const th = this.thumpers.filter((t) => !t.used && distance(w.c, w.r, t.c, t.r) <= 12).sort((a, b) => distance(w.c, w.r, a.c, a.r) - distance(w.c, w.r, b.c, b.r))[0];
     if (th) {
       const route = this.sandRoute(w.c, w.r, th.c, th.r, sandPass);
@@ -703,7 +710,7 @@ export class Game {
       for (const u of this.units) {
         if (u.dead || u.carried || u.def.mt === 'air' || !this.isSand(u.c, u.r)) continue;
         const d = distance(w.c, w.r, u.c, u.r);
-        if (d > 14) continue;
+        if (d > 11 || !sandPass(u.c, u.r)) continue;
         const s = (u.vib + (u.def.harvester ? 1 : 0)) / (1 + d * 0.22);
         if (s > bs) { bs = s; best = u; }
       }
@@ -734,7 +741,7 @@ export class Game {
         if (last.c === best.c && last.r === best.r) {
           const hexes = this.wormBite(w, last.c, last.r);
           const eaten = this.units.filter((u) => !u.dead && !u.carried && u.def.mt !== 'air' && hexes.some(([c, r]) => c === u.c && r === u.r));
-          for (const u of eaten) this.kill(u);
+          for (const u of eaten) { this.kill(u); this.players[u.owner].stats.eaten++; }
           w.sated = WORM_SIZES[w.size || 1].sated;
           ev.push({ type: 'worm', id: w.id, path, eatMany: eaten.map((u) => u.id), eatHexes: hexes, owner: best.owner });
           if (best.owner === 0) this.say(`Ein Wurm hat euren ${best.def.name} verschlungen!`, 'bad');
@@ -824,6 +831,14 @@ export class Game {
 
   checkEnd() {
     const alive = (o) => this.buildings.some((b) => !b.dead && b.owner === o);
+    if (this.mission) {
+      const r = this.mission.check(this);
+      this.missionStatus = r;
+      if (r.failed) this.state = 'lost';
+      else if (r.done) this.state = 'won';
+      else if (!alive(0) && !this.units.some((u) => !u.dead && u.owner === 0)) this.state = 'lost';
+      return this.state;
+    }
     if (!alive(1)) this.state = 'won';
     else if (!alive(0) && !this.units.some((u) => !u.dead && u.owner === 0)) this.state = 'lost';
     return this.state;
@@ -835,12 +850,12 @@ export class Game {
     return JSON.stringify({ v: 2, seed: this.map.seed, ter: this.map.ter, spice: Array.from(this.map.spice), round: this.round, current: this.current,
       players: this.players, units: this.units.filter((u) => !u.dead).map(strip), buildings: this.buildings.filter((b) => !b.dead).map(strip),
       worms: this.worms.map(strip), storm: { c: this.storm.c, r: this.storm.r, rad: this.storm.rad, dir: this.storm.dir, next: this.storm.next },
-      thumpers: this.thumpers, explored: Array.from(this.explored).join(''), revealRound: this.revealRound, aiMode: this.aiMode, diffName: this.diffName });
+      thumpers: this.thumpers, explored: Array.from(this.explored).join(''), revealRound: this.revealRound, aiMode: this.aiMode, diffName: this.diffName, missionId: this.mission?.id || null, aiPassive: !!this.aiPassive });
   }
   static restore(map, data, diff) {
     map.ter = data.ter; map.spice = Float32Array.from(data.spice);
     const g = new Game(map, { diff });
-    g.diffName = data.diffName; g.round = data.round; g.current = 0; g.aiMode = data.aiMode; g.revealRound = data.revealRound;
+    g.diffName = data.diffName; g.aiPassive = data.aiPassive; g.round = data.round; g.current = 0; g.aiMode = data.aiMode; g.revealRound = data.revealRound;
     g.players = data.players.map((p) => ({ ...p, perk: FACTIONS[p.faction].perk || {} }));
     g.units = data.units.map((u) => ({ ...u, def: UNITS[u.type] }));
     g.buildings = data.buildings.map((b) => ({ ...b, def: BUILDINGS[b.type], rise: 1 }));

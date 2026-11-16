@@ -354,6 +354,73 @@ export class Controller {
     w.vis = null; w.forceShow = false;
   }
 
+  async animOrbital(ev) {
+    const g = this.g, units = ev.units.map((id) => g.get(id)).filter(Boolean);
+    const seen = ev.owner === 0 || units.some((u) => g.visible[g.i(u.c, u.r)]);
+    if (!seen) return;
+    const col = g.players[ev.owner].color;
+    for (const u of units) u.hidden = true;
+    const tgt = center(ev.c, ev.r);
+    this.r.centerOn(tgt.x, tgt.y); await this.wait(0.3);
+    const pods = units.map((u, i) => { const p = center(u.c, u.r); return { x: p.x, y: p.y, h: 520 + i * 60, open: 0, color: col, ox: 260 + i * 30 }; });
+    this.r.pods.push(...pods);
+    await this.tween(1.0, (k) => {
+      for (const pd of pods) {
+        const kk = Math.min(1, k * (520 / (pd.h0 || (pd.h0 = pd.h))));
+        pd.cur = 1 - k; pd.hh = pd.h0 * (1 - k);
+        pd.h = pd.hh; pd.drawX = pd.x + pd.ox * (1 - k);
+        if (Math.random() < 0.9) { this.fx.fire(pd.x + pd.ox * (1 - k) * 0, pd.y - pd.h, 1, 5); this.fx.smoke(pd.x, pd.y - pd.h + 10, 1, 5, 0.6); }
+      }
+    });
+    for (const pd of pods) { pd.h = 0; this.fx.explosion(pd.x, pd.y, 0.7); this.fx.ring(pd.x, pd.y, 14, '255,220,170', 0.6); this.fx.dust(pd.x, pd.y, 16, '200,160,110', 40, 9); }
+    this.fx.shake = 7;
+    await this.tween(0.4, (k) => { for (const pd of pods) pd.open = k; });
+    for (const u of units) { u.hidden = false; this.hitFlash(u); }
+    await this.wait(0.5);
+    this.r.pods = this.r.pods.filter((p) => !pods.includes(p));
+    if (ev.owner === 0) { g.updateVision(); this.r.fogDirty = true; }
+  }
+
+  async doVoice(u, t) {
+    const g = this.g;
+    const ev = g.voice(u, t);
+    const a = this.r.posOf(u), b = this.r.posOf(t);
+    if (u.owner === 0 || g.seen(u) || g.seen(t)) {
+      this.ensureVisible(b.x, b.y);
+      await this.tween(0.7, (k, dt) => {
+        if (Math.random() < dt * 14) this.fx.ring(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, 4, '210,150,255', 0.5);
+      });
+      this.fx.ring(b.x, b.y, 10, '210,150,255', 0.7); this.fx.flash(b.x, b.y, 30, '190,120,255', 0.3);
+      this.r.float(b.x, b.y - 10, 'Gelähmt!', '#d6a8ff', true);
+      await this.wait(0.4);
+    }
+  }
+
+  async doCard(owner, idx, c, r) {
+    const g = this.g;
+    const ev = g.playCard(owner, idx, c, r);
+    if (!ev) return false;
+    const p = center(c, r);
+    const card = CARDS[ev.card];
+    const visible = owner === 0 || (c !== undefined && g.visible[g.i(c, r)]);
+    await this.banner(card.name, owner === 0 ? 'Intrige der Schwesternschaft' : `${g.players[owner].name} spielt eine Intrige`, 0.9);
+    if (!visible && !['wetter', 'sabotage', 'stimme', 'verrat'].includes(ev.card)) { this.refresh(); return true; }
+    if (ev.target || ev.card === 'klopfer' || ev.card === 'wetter') { this.r.centerOn(p.x, p.y); await this.wait(0.3); }
+    const fx = this.fx;
+    if (ev.card === 'stimme') { fx.ring(p.x, p.y, 12, '210,150,255', 0.8); fx.flash(p.x, p.y, 40, '190,120,255', 0.4); this.r.float(p.x, p.y, 'Gelähmt!', '#d6a8ff', true); }
+    else if (ev.card === 'vorahnung') { this.r.fogDirty = true; $('#app').classList.add('vision'); setTimeout(() => $('#app').classList.remove('vision'), 900); }
+    else if (ev.card === 'wetter') { fx.ring(p.x, p.y, 20, '255,190,120', 0.8); this.r.float(p.x, p.y, 'Sturm umgelenkt', '#ffc080', true); }
+    else if (ev.card === 'klopfer') { fx.dust(p.x, p.y, 10, '200,160,110', 20, 6); this.r.float(p.x, p.y, 'Klopfer gesetzt', '#ffd080', true); }
+    else if (ev.card === 'verrat') { const u = g.get(ev.target); fx.spark(p.x, p.y, 20, '210,160,255', 90); if (u) this.hitFlash(u); this.r.float(p.x, p.y, 'Übergelaufen!', '#d6a8ff', true); }
+    else if (ev.card === 'schild') { fx.ring(p.x, p.y, 14, '140,210,255', 0.8); this.r.float(p.x, p.y, 'Schildwall', '#9fdcff', true); }
+    else if (ev.card === 'sabotage') { for (let k = 0; k < 6; k++) setTimeout(() => { fx.spark(p.x + (Math.random() - 0.5) * 30, p.y + (Math.random() - 0.5) * 30, 6, '255,200,120', 80); fx.smoke(p.x, p.y, 2, 6, 0.9); }, k * 90); this.r.float(p.x, p.y, 'Sabotiert!', '#ffb070', true); }
+    else if (ev.card === 'gilde' && owner === 0) { this.flash('Nächster Orbital-Drop kostenlos'); }
+    await this.wait(0.6);
+    g.updateVision(); this.r.fogDirty = true;
+    this.refresh();
+    return true;
+  }
+
   async doThump(u, c, r) {
     const g = this.g;
     g.thump(u, c, r);
@@ -635,12 +702,18 @@ export class Controller {
 
   checkEnd() {
     const s = this.g.checkEnd();
+    if (this.g.mission) this.refresh();
     if (s === 'play') return false;
     this.busy = true;
     const el = $('#endscreen');
-    const p = this.g.players[0];
-    el.querySelector('h1').textContent = s === 'won' ? 'Der Sand gehört euch' : 'Eure Basis ist gefallen';
-    el.querySelector('.stats').innerHTML = `Runde ${this.g.round} · Gegner vernichtet: ${p.stats.kills} · Eigene Verluste: ${p.stats.lost} · Glut geerntet: ${p.stats.harvested}`;
+    const p = this.g.players[0], m = this.g.mission;
+    el.querySelector('h1').textContent = m ? (s === 'won' ? 'Mission erfüllt' : 'Mission gescheitert') : s === 'won' ? 'Der Sand gehört euch' : 'Eure Basis ist gefallen';
+    el.querySelector('.stats').innerHTML = `${m ? `<b>${m.title}</b><br>` : ''}Runde ${this.g.round} · Gegner vernichtet: ${p.stats.kills} · Eigene Verluste: ${p.stats.lost} · Glut geerntet: ${p.stats.harvested}`;
+    if (m) {
+      if (s === 'won') this.onMissionWon?.(m);
+      el.querySelector('.ebtns').innerHTML = `<button id="tocamp" class="primary">${s === 'won' ? 'Zur Kampagne' : 'Kampagne'}</button><button onclick="location.reload()">Hauptmenü</button>`;
+      el.querySelector('#tocamp').onclick = () => { try { sessionStorage.setItem('sandthron-open-campaign', '1'); } catch {} location.reload(); };
+    }
     el.classList.add('show');
     try { localStorage.removeItem('sandthron-save'); } catch (e) {}
     this.onEnd?.();
@@ -751,6 +824,12 @@ export class Controller {
     pw.parentElement.classList.toggle('low', p.low);
     const left = g.ownUnits(0).filter((u) => !u.acted && !u.carried && !u.moved && !(u.def.harvester && u.auto)).length;
     $('#nextunit').textContent = left ? `Nächste Einheit (${left})` : 'Nächste Einheit';
+    const ob = $('#objectives');
+    if (g.mission) {
+      const st = g.missionStatus || g.mission.check(g);
+      ob.innerHTML = `<b>${g.mission.title}</b>` + st.lines.map((l) => `<div class="${l.ok ? 'ok' : ''}">${l.ok ? '✓' : '○'} ${l.text}</div>`).join('');
+      ob.classList.add('show');
+    } else ob.classList.remove('show');
     const cb = $('#cardsbtn'); cb.textContent = `Intrigen (${p.cards.length})`; cb.classList.toggle('ready', p.cards.length > 0 && g.canPlayCard(0));
     if (this.sel && !this.sel.dead) this.showPanel(this.sel, true);
   }

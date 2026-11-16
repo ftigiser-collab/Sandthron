@@ -32,7 +32,7 @@ export function generateMap(seed, W = 30, H = 22) {
   const mid = { c: W / 2, r: H / 2 };
   for (const s of starts) {
     const dc = mid.c - s.c, dr = mid.r - s.r, l = Math.hypot(dc, dr);
-    fields.push({ c: Math.round(s.c + dc / l * 6.5), r: Math.round(s.r + dr / l * 6.5), rad: 2 });
+    fields.push({ c: Math.round(s.c + dc / l * 5.5), r: Math.round(s.r + dr / l * 5.5), rad: 2 });
     fields.push({ c: Math.round(s.c + dr / l * 6), r: Math.round(s.r - dc / l * 4), rad: 1 });
   }
   fields.push({ c: Math.round(mid.c), r: Math.round(mid.r), rad: 2 });
