@@ -1360,8 +1360,8 @@ export class Controller {
     this.r.hl.build = g.buildHexes(0, t);
     if (!this.r.hl.build.length) { this.flash('Kein freies Felsfeld in Reichweite der Basis'); this.mode = 'idle'; return; }
     this.flash(`${d.name}: grünes Feld antippen`);
-    // Auf schmalen Bildschirmen das Menü einklappen, damit die Felder frei liegen
-    if (!fromCard || window.innerWidth < 700) $('#panel').classList.remove('show');
+    // Menü einklappen, damit alle Bauplätze frei liegen
+    $('#panel').classList.remove('show');
   }
 
   panelAction(a, t, e) {
