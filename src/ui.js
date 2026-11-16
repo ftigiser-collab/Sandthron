@@ -717,6 +717,23 @@ export class Controller {
     if (Math.hypot(x - home.x, y - home.y) > 2) await this.tween(0.45, (k) => { const e = k * k * (3 - 2 * k); car.vis = { x: x + (home.x - x) * e, y: y + (home.y - y) * e }; });
     car.vis = null; car.z = undefined;
   }
+  // Ein- und Aussteigen
+  async animBoard(apc, t) {
+    const g = this.g, a = center(t.c, t.r), b = center(apc.c, apc.r);
+    t.vis = { ...a };
+    await this.tween(0.45, (k) => { t.vis = { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k }; t.facing = Math.atan2(b.y - a.y, b.x - a.x); });
+    g.board(apc, t); t.vis = null;
+    this.fx.dust(b.x, b.y, 4, '190,150,100', 14, 4);
+  }
+  async animUnload(apc, c, r) {
+    const g = this.g, ev = g.unload(apc, c, r); if (!ev) return;
+    const t = g.get(ev.t), a = center(apc.c, apc.r), b = center(c, r);
+    t.vis = { ...a };
+    await this.tween(0.45, (k) => { t.vis = { x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k }; t.facing = Math.atan2(b.y - a.y, b.x - a.x); });
+    t.vis = null; this.fx.dust(b.x, b.y, 4, '190,150,100', 14, 4);
+    if (apc.owner === 0) { g.updateVision(); this.r.fogDirty = true; }
+  }
+
   // Landen / Starten: absinken mit Staub und Flügel einklappen bzw. hochziehen
   async animLand(u, down) {
     const g = this.g, p = center(u.c, u.r), fx = this.fx;
@@ -863,7 +880,7 @@ export class Controller {
       }
       this.mode = 'moved'; this.select(this.sel); return;
     }
-    if (['card', 'orbital', 'voice', 'thump', 'capture', 'repair', 'infiltrate', 'callworm', 'strike', 'endgame', 'field'].includes(this.mode)) {
+    if (['card', 'orbital', 'voice', 'thump', 'capture', 'repair', 'infiltrate', 'callworm', 'strike', 'endgame', 'field', 'board', 'unload'].includes(this.mode)) {
       const hit = this.r.hl.target.some(([tc, tr]) => tc === c && tr === r);
       const m = this.mode; this.clearHL(); this.mode = 'idle';
       if (!hit) { this.deselect(); return; }
@@ -875,6 +892,8 @@ export class Controller {
       else if (m === 'callworm') await this.doWormCall(this.sel, c, r);
       else if (m === 'strike') { if (g.orderStrike(0, c, r)) { const p = center(c, r); this.fx.ring(p.x, p.y, 20, '255,90,70', 0.7); } }
       else if (m === 'field') await this.sendToField(this.sel, c, r);
+      else if (m === 'board') { const t = g.units.find((x) => !x.dead && !x.carried && x.c === c && x.r === r && g.canBoard(this.sel, x)); if (t) await this.animBoard(this.sel, t); }
+      else if (m === 'unload') { const apc = this.sel; await this.animUnload(apc, c, r); if ((apc.passengers || []).length && g.unloadHexes(apc).length) { this.busy = false; this.select(apc); this.refresh(); return; } const t = g.units.find((x) => !x.dead && x.c === c && x.r === r && !x.carried && x.def.mt !== 'air'); if (t && g.canFire(t) && g.targetsFrom(t, t.c, t.r).length) { this.busy = false; this.select(t); this.mode = 'moved'; this.refresh(); return; } }
       else if (m === 'endgame') { if (g.orderEndgame(0, c, r)) { const p = center(c, r); this.fx.ring(p.x, p.y, 40, '255,210,120', 0.8); this.fx.flash(p.x, p.y, 60, '255,220,150', 0.3); } }
       else if (m === 'voice') { const t = g.voiceTargets(this.sel).find((t) => t.c === c && t.r === r); if (t) await this.doVoice(this.sel, t); }
       this.busy = false; this.deselect(); this.refresh(); return;
@@ -1342,6 +1361,7 @@ export class Controller {
         ${e.def.ammo ? `<span>Munition</span><b>${e.ammo} / ${e.def.ammo}</b>` : ''}
         ${e.def.harvester ? `<span>Ladung</span><b>${Math.round(e.cargo)} / ${e.def.capacity}</b>` : ''}
         ${e.def.carrier ? `<span>Fracht</span><b>${e.carrying ? g.get(e.carrying)?.def.name : 'leer'}</b>` : ''}
+        ${e.def.transport ? `<span>Insassen</span><b>${(e.passengers || []).map((id) => g.get(id)?.def.name).filter(Boolean).join(', ') || 'leer'} (${(e.passengers || []).length}/${e.def.transport})</b>` : ''}
         ${e.def.mt !== 'air' ? `<span>Gelände</span><b>${TERRAIN[g.terr(e.c, e.r)].name} (${Math.round(TERRAIN[g.terr(e.c, e.r)].def * 100)} % Deckung)</b>` : ''}
       </div><div class="p-desc">${e.def.desc}</div>`;
       if (own && g.current === 0) {
@@ -1371,6 +1391,12 @@ export class Controller {
           if (e.carrying) btns.push('<button data-a="drop">Absetzen</button>');
           else if (g.units.some((t) => g.canPickup(e, t))) btns.push('<button data-a="pickup">Aufnehmen</button>');
         }
+        if (e.def.transport) {
+          const nP = (e.passengers || []).length;
+          if (!e.acted && g.units.some((t) => g.canBoard(e, t))) btns.push('<button data-a="board">Trupp aufnehmen</button>');
+          if (nP && !e.acted) btns.push(g.unloadHexes(e).length ? `<button data-a="unload" class="primary">Aussteigen (${nP})</button>` : '<button disabled>Kein Platz zum Aussteigen</button>');
+        }
+        if (g.isFootInf(e) && !e.acted) { const apc = g.units.find((a) => g.canBoard(a, e)); if (apc) btns.push('<button data-a="embark">Einsteigen</button>'); }
         if (g.canLand(e)) btns.push('<button data-a="land">⬇ Landen</button>');
         if (e.landed) btns.push(g.canTakeoff(e) ? '<button data-a="takeoff" class="primary">⬆ Starten</button>' : '<button disabled>Gelandet — nächste Runde startbereit</button>');
         if (!e.acted && !e.def.harvOnly) btns.push('<button data-a="wait">Warten</button>');
@@ -1522,6 +1548,9 @@ export class Controller {
     if (a === 'wait') { e.acted = true; e.moved = true; this.deselect(); this.refresh(); return; }
     if (a === 'escort') { e.escort = !e.escort; if (e.escort && !g.get(e.assigned)) { const h = g.ownUnits(0).filter((x) => x.def.harvester).sort((p, q) => distance(q.c, q.r, e.c, e.r) - distance(p.c, p.r, e.c, e.r))[0]; if (h) e.assigned = h.id; } this.flash(e.escort ? 'Der Träger bleibt künftig beim Sammler' : 'Der Träger parkt künftig auf der Raffinerie'); this.showPanel(e); return; }
     if (a === 'evac') { this.evacuate(e); return; }
+    if (a === 'board') { this.clearHL(); this.r.hl.sel = e; this.mode = 'board'; this.r.hl.target = g.units.filter((t) => g.canBoard(e, t)).map((t) => [t.c, t.r]); this.flash('Trupp neben dem Transporter antippen'); return; }
+    if (a === 'unload') { this.clearHL(); this.r.hl.sel = e; this.mode = 'unload'; this.r.hl.target = g.unloadHexes(e); this.flash('Freies Nachbarfeld zum Aussteigen antippen'); return; }
+    if (a === 'embark') { const apc = g.units.find((x) => g.canBoard(x, e)); if (apc) { this.busy = true; this.animBoard(apc, e).then(() => { this.busy = false; this.deselect(); this.refresh(); }); } return; }
     if (a === 'field') { this.clearHL(); this.r.hl.sel = e; this.mode = 'field'; this.r.hl.target = []; for (let r = 0; r < g.H; r++) for (let c = 0; c < g.W; c++) if (g.spiceAt(c, r) > 0 && g.explored[g.i(c, r)] && (c !== e.c || r !== e.r)) this.r.hl.target.push([c, r]); $('#panel').classList.remove('show'); this.flash('Glutfeld antippen — der Ernte-Träger fliegt den Sammler hin'); return; }
     if (a === 'land') { if (g.canLand(e)) { this.busy = true; this.animLand(e, true).then(() => { this.busy = false; this.deselect(); this.refresh(); }); } return; }
     if (a === 'takeoff') { if (g.canTakeoff(e)) { this.busy = true; this.animLand(e, false).then(() => { this.busy = false; this.select(e); this.refresh(); }); } return; }

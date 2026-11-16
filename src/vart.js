@@ -142,6 +142,25 @@ const flakTurret = (color) => part(`vt-flak-${color}`, 34, 16, (L) => {
   L((c) => { c.fillStyle = rg(c, -2, -2, 1, 6, '#e0d4ba', '#64594a'); c.beginPath(); c.arc(0, 0, 5.6, 0, 6.28); c.fill(); c.fillStyle = color; c.beginPath(); c.arc(-1.4, 0, 1.8, 0, 6.28); c.fill(); rivets(c, [[3, -3], [3, 3]], 0.4); }, { bevel: 0.7 });
 });
 
+// ---------- Truppentransporter ----------
+const apcHull = (color) => part(`vh-apc-${color}`, 44, 28, (L) => {
+  L((c) => { for (const x of [-12, -1, 10]) for (const y of [-10.5, 10.5]) wheel(c, x, y, 2.9); }, { bevel: 0.5, grime: 0.35 });
+  L((c) => {
+    hullPlate(c, [[17, -4], [14, -9], [-15, -9], [-18, -6], [-18, 6], [-15, 9], [14, 9], [17, 4]], '#c4b190', '#625240');
+    hullPlate(c, [[12, -6], [-12, -6.5], [-12, 6.5], [12, 6]], '#d6c4a2', '#7a6950');
+    c.fillStyle = '#2f2a23'; c.fillRect(-18, -5, 3, 10); hazard(c, -18, -5, 3, 10);
+    for (const y of [-4.2, 4.2]) { c.fillStyle = 'rgba(160,220,255,0.75)'; rr(c, 13, y - 1.4, 2.4, 2.8, 0.5); c.fill(); }
+    c.strokeStyle = 'rgba(30,25,18,0.5)'; c.lineWidth = 0.5; for (const x of [-6, 0, 6]) { c.beginPath(); c.moveTo(x, -6.4); c.lineTo(x, 6.4); c.stroke(); }
+    c.fillStyle = color; c.fillRect(-12, -1, 22, 2);
+    rivetRow(c, -14, -8.2, 12, -8.2, 9, 0.35); rivetRow(c, -14, 8.2, 12, 8.2, 9, 0.35);
+    vents(c, -10, -5, 4, 3, 3, true);
+  }, { bevel: 0.8, dust: 0.35 });
+});
+const apcTurret = (color) => part(`vt-apc-${color}`, 24, 12, (L) => {
+  L((c) => { c.fillStyle = '#1b1915'; c.fillRect(2, -0.9, 9, 1.8); }, { bevel: 0.3 });
+  L((c) => { c.fillStyle = rg(c, -1.5, -1.5, 0.5, 4.5, '#e0d4ba', '#64594a'); rr(c, -4, -3.5, 7, 7, 1.6); c.fill(); c.fillStyle = color; c.fillRect(-4, -3.5, 1.4, 7); }, { bevel: 0.7 });
+});
+
 // ---------- Sandläufer ----------
 const trikeBody = (color) => part(`vh-trike-${color}`, 34, 26, (L) => {
   L((c) => { wheel(c, -7, -8, 3.6); wheel(c, -7, 8, 3.6); wheel(c, 11, 0, 3); }, { bevel: 0.5, grime: 0.3 });
@@ -444,6 +463,12 @@ export const VDRAW = {
     ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(255,140,40,${0.5 + 0.4 * Math.sin(t * 14)})`; ctx.beginPath(); ctx.arc(21, 0, 2.2, 0, 6.28); ctx.fill(); ctx.globalCompositeOperation = 'source-over';
   },
   flakwagen(ctx, u, color, t, o) { hullWithTurret(ctx, u, color, t, o, flakHull(color), flakTurret(color), null, -3); },
+  apc(ctx, u, color, t, o) {
+    hullWithTurret(ctx, u, color, t, o, apcHull(color), apcTurret(color), null, 5);
+    // Insassen-Anzeige: belegte Sitzplätze als Lichter am Heck
+    const n = (u.passengers || []).length, cap = u.def.transport || 2;
+    for (let k = 0; k < cap; k++) { ctx.fillStyle = k < n ? '#8ef08a' : 'rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.arc(-9 + k * 4, 0, 1.2, 0, 6.28); ctx.fill(); }
+  },
   trike(ctx, u, color, t, o) {
     ctx.rotate(u.facing); const p = trikeBody(color);
     drawPartShadow(ctx, p, 3, 4, 0.35); drawPart(ctx, p);

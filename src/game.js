@@ -244,13 +244,38 @@ export class Game {
       u.facing = ang(a.c, a.r, c, r);
     }
     u.c = c; u.r = r; u.moved = true;
-    const carried = this.get(u.carrying); if (carried) { carried.c = c; carried.r = r; }
+    const carried = this.get(u.carrying); if (carried) { carried.c = c; carried.r = r; if (carried.passengers) this.syncPassengers(carried); }
+    if (u.passengers) this.syncPassengers(u);
     return path;
   }
 
   // ---------- Kampf ----------
   weapon(e) { return WEAPONS[e.def.weapon] || null; }
   isAir(e) { return e.isUnit && e.def.mt === 'air'; }
+  // ---------- Truppentransporter ----------
+  isFootInf(t) { return t && t.isUnit && (t.def.mt === 'foot' || t.def.mt === 'sandfoot') && !t.def.harvester; }
+  canBoard(apc, t) {
+    return apc && apc.def.transport && !apc.dead && t && !t.dead && t !== apc && this.isFootInf(t) && t.owner === apc.owner && !t.carried && !t.acted
+      && (apc.passengers || []).length < apc.def.transport && distance(apc.c, apc.r, t.c, t.r) <= 1 && t.owner === this.current;
+  }
+  board(apc, t) {
+    apc.passengers = [...(apc.passengers || []), t.id];
+    t.carried = true; t.c = apc.c; t.r = apc.r; t.moved = true; t.acted = true; t.inApc = apc.id;
+    return { type: 'board', apc: apc.id, t: t.id };
+  }
+  unloadHexes(apc) {
+    if (!(apc.passengers || []).length || apc.acted) return [];
+    const t = this.get(apc.passengers[0]);
+    return neighbors(apc.c, apc.r, this.W, this.H).filter(([c, r]) => this.groundFree(c, r) && this.cost(t.def.mt, c, r) !== Infinity && !this.inStorm(c, r));
+  }
+  unload(apc, c, r) {
+    const id = (apc.passengers || []).shift(); const t = this.get(id); if (!t) return null;
+    t.carried = false; t.c = c; t.r = r; t.moved = true; t.acted = false; t.inApc = null;
+    return { type: 'unload', apc: apc.id, t: t.id };
+  }
+  // Insassen fahren mit
+  syncPassengers(apc) { for (const id of apc.passengers || []) { const t = this.get(id); if (t) { t.c = apc.c; t.r = apc.r; } } }
+
   // ---------- Thopter landen / starten ----------
   isThopter(u) { return u.isUnit && UNITS[u.type].mt === 'air'; }
   landedDef(type) { LANDED[type] = LANDED[type] || { ...UNITS[type], mt: 'track', landedForm: true }; return LANDED[type]; }
@@ -411,6 +436,8 @@ export class Game {
     lt[e.type] = (lt[e.type] || 0) + 1;
     if (e.isUnit) {
       const c = this.get(e.carrying); if (c) this.kill(c, by);
+      for (const id of e.passengers || []) { const pp = this.get(id); if (pp && !pp.dead) this.kill(pp, by); }
+      e.passengers = [];
       if (e.def.harvester && e.cargo > 0 && this.isSand(e.c, e.r)) this.map.spice[this.i(e.c, e.r)] += e.cargo;
       this.say(`${e.def.name} verloren`, 'bad', e.owner);
     } else {
@@ -818,11 +845,17 @@ export class Game {
   }
   drop(carrier, c, r) {
     const t = this.get(carrier.carrying); if (!t) return null;
-    t.carried = false; t.c = c; t.r = r; t.waitCarry = 0; carrier.carrying = 0; carrier.acted = true; carrier.moved = true;
+    t.carried = false; t.c = c; t.r = r; t.waitCarry = 0; if (t.passengers) this.syncPassengers(t); carrier.carrying = 0; carrier.acted = true; carrier.moved = true;
     return { type: 'drop', u: carrier.id, t: t.id };
   }
 
   // ---------- Weltphase ----------
+  // Sturmzentrum zulässig: weit genug von allen Startbasen und keinem Gebäude im Sturmgebiet (plus ein Feld Rand)
+  stormOk(c, r, rad = 2) {
+    if (c < 1 || r < 1 || c >= this.W - 1 || r >= this.H - 1) return false;
+    if (!this.map.starts.every((st) => distance(c, r, st.c, st.r) >= rad + 5)) return false;
+    return !this.buildings.some((b) => !b.dead && distance(b.c, b.r, c, r) <= rad + 1);
+  }
   stormStep(s) {
     let dir = s.dir;
     if (this.rnd() < 0.35) dir = (dir + (this.rnd() < 0.5 ? 1 : 5)) % 6;
@@ -835,9 +868,15 @@ export class Game {
       let moved = false;
       for (const d of order) {
         const nc = c + t[d][0], nr = r + t[d][1];
-        if (nc >= 1 && nr >= 1 && nc < this.W - 1 && nr < this.H - 1 && this.map.starts.every((st) => distance(nc, nr, st.c, st.r) >= 5)) { c = nc; r = nr; dir = d; moved = true; break; }
+        if (this.stormOk(nc, nr, s.rad)) { c = nc; r = nr; dir = d; moved = true; break; }
       }
       if (!moved) break;
+    }
+    // Festgefahren in Basisnähe: Sturm zieht in eine freie Gegend weiter
+    if (!this.stormOk(c, r, s.rad)) {
+      const cands = [];
+      for (let rr = 1; rr < this.H - 1; rr++) for (let cc = 1; cc < this.W - 1; cc++) if (this.stormOk(cc, rr, s.rad)) cands.push([cc, rr]);
+      if (cands.length) { cands.sort((a, b) => distance(a[0], a[1], c, r) - distance(b[0], b[1], c, r)); [c, r] = cands[0]; }
     }
     return { c, r, dir };
   }

@@ -128,6 +128,8 @@ export const UNITS = {
              desc: 'Elite-Infanterie der Gilde, nur per Orbital-Drop. Gaußgewehr trifft auch Thopter.' },
   legionaer: { name: 'Kaiserlicher Legionär', cat: 'drop', move: 3, mt: 'foot', sight: 2, armor: 'inf', weapon: 'gauss', cost: 0, vib: 1, tough: 0.55,
              desc: 'Gefürchtete Elitelegion des Kaisers, nur über die Kaiserliche Legion. Nimmt kaum Schaden, Gaußgewehr trifft auch Thopter.' },
+  apc:     { name: 'Truppentransporter', cat: 'veh', move: 5, mt: 'wheel', sight: 2, armor: 'light', weapon: 'mg', cost: 700, prereq: ['fabrik'], vib: 2.5, transport: 2,
+             desc: 'Gepanzerter Sechsradtransporter für zwei Infanterietrupps. Einsteigen von einem Nachbarfeld, Aussteigen auf freie Nachbarfelder — ausgestiegene Trupps können noch angreifen. Wird er zerstört, sterben die Insassen.' },
   erntetraeger: { name: 'Ernte-Träger', cat: 'air', move: 9, mt: 'air', sight: 2, armor: 'air', cost: 900, prereq: ['raffinerie'], carrier: true, harvOnly: true, refOnly: true,
              desc: 'Breiter Lastenträger, kommt mit jeder Raffinerie und lässt sich dort nachbauen (einer je Raffinerie). Trägt ausschließlich Ernter: fliegt volle heim und leere zurück aufs Feld.' },
   traeger: { name: 'Träger-Thopter', cat: 'air', move: 8, mt: 'air', sight: 2, armor: 'air', cost: 650, prereq: ['horst'], carrier: true,
