@@ -3,9 +3,9 @@ import { Noise, clamp, smoothstep } from './util.js';
 import { center, neighbors, distance, worldSize, pixelToHex, R, HW } from './hex.js';
 import { MOVE_COST } from './data.js';
 
-export function generateMap(seed, W = 30, H = 22) {
+export function generateMap(seed, W = 30, H = 22, n = 2) {
   const N = new Noise(seed), N2 = new Noise(seed + 7), N3 = new Noise(seed + 13), N4 = new Noise(seed + 29);
-  const starts = [{ c: 4, r: 4 }, { c: W - 5, r: H - 5 }];
+  const starts = [{ c: 4, r: 4 }, { c: W - 5, r: H - 5 }, { c: W - 5, r: 4 }, { c: 4, r: H - 5 }].slice(0, Math.max(2, Math.min(4, n)));
   const ter = new Array(W * H), spice = new Float32Array(W * H);
   const idx = (c, r) => r * W + c;
 
@@ -54,10 +54,12 @@ export function generateMap(seed, W = 30, H = 22) {
   }
 
   // Fahrzeug-Verbindung zwischen den Basen sicherstellen
-  if (!reachable(ter, W, H, starts[0], starts[1])) carve(ter, W, H, starts[0], starts[1]);
+  for (let k = 1; k < starts.length; k++) if (!reachable(ter, W, H, starts[0], starts[k])) carve(ter, W, H, starts[0], starts[k]);
 
   // Schlüsselorte: Mitte und zwei umkämpfte Orte gleich weit von beiden Basen, je ein Heiligtum nahe jeder Basis
-  const targets = [[0.5, 0.5, 'zisterne'], [0.24, 0.78, 'warte'], [0.76, 0.22, 'schmuggler'], [0.36, 0.3, 'heiligtum'], [0.64, 0.7, 'heiligtum']];
+  const targets = starts.length <= 2
+    ? [[0.5, 0.5, 'zisterne'], [0.24, 0.78, 'warte'], [0.76, 0.22, 'schmuggler'], [0.36, 0.3, 'heiligtum'], [0.64, 0.7, 'heiligtum']]
+    : [[0.5, 0.5, 'zisterne'], [0.5, 0.16, 'warte'], [0.5, 0.84, 'schmuggler'], [0.32, 0.32, 'heiligtum'], [0.68, 0.68, 'heiligtum'], [0.68, 0.32, 'heiligtum'], [0.32, 0.68, 'heiligtum']].slice(0, 3 + starts.length);
   const pois = [];
   for (const [fx, fy, type] of targets) {
     const tc = Math.round(fx * (W - 1)), tr = Math.round(fy * (H - 1));

@@ -15,11 +15,11 @@ export class Game {
     this.byId = new Map();
     this.round = 1; this.current = 0;
     this.diff = opts.diff;
-    this.players = [
-      this.mkPlayer(0, opts.playerFaction || 'vareth'),
-      this.mkPlayer(1, opts.enemyFaction || 'kordan'),
-    ];
-    this.players[1].incomeMult = opts.diff?.aiBonus ?? 1;
+    const facs = opts.factions || [opts.playerFaction || 'vareth', opts.enemyFaction || 'kordan'];
+    this.players = facs.map((f, i) => this.mkPlayer(i, f));
+    for (const p of this.players) if (p.id > 0) p.incomeMult = opts.diff?.aiBonus ?? 1;
+    if (opts.startCredits) for (const p of this.players) p.credits = opts.startCredits;
+    this.wormCount = opts.worms ?? 2;
     this.visible = new Uint8Array(this.W * this.H);
     this.explored = new Uint8Array(this.W * this.H);
     this.radar = new Uint8Array(this.W * this.H);
@@ -55,23 +55,34 @@ export class Game {
 
   // ---------- Aufbau ----------
   setup() {
-    const [s0, s1] = this.map.starts;
-    for (const [o, s, sg] of [[0, s0, 1], [1, s1, -1]]) {
+    this.players.forEach((pl, o) => {
+      const s = this.map.starts[o]; if (!s) return;
+      const sgc = s.c < this.W / 2 ? 1 : -1, sgr = s.r < this.H / 2 ? 1 : -1;
       this.addBuilding(o, 'bauhof', s.c, s.r, true);
       const free = ring(s.c, s.r, 2, this.W, this.H).filter(([c, r]) => this.groundFree(c, r) && this.cost('foot', c, r) < Infinity);
-      free.sort((a, b) => (b[0] - a[0]) * sg + (b[1] - a[1]) * sg);
+      free.sort((a, b) => (b[0] - a[0]) * sgc + (b[1] - a[1]) * sgr);
       const types = ['inf', 'inf', 'rak', 'trike'];
       types.forEach((t, i) => { const h = free[i]; if (h) this.addUnit(o, t, h[0], h[1]); });
-    }
+    });
     // Sturm weit weg von den Basen beginnen
     this.storm = { c: Math.round(this.W / 2), r: 1, rad: 2, dir: 5 };
     this.storm.next = this.stormStep(this.storm);
-    this.spawnWorm(); this.spawnWorm();
+    for (let k = 0; k < (this.wormCount ?? 2); k++) this.spawnWorm();
     this.updatePower();
     this.updateVision();
   }
 
   say(text, kind = 'info', owner = 0) { if (owner === 0) { this.log.push({ text, kind, round: this.round, t: performance.now() }); if (this.log.length > 40) this.log.shift(); } }
+
+  // ---------- Mehrspieler-Hilfen ----------
+  alive(o) { return this.buildings.some((b) => !b.dead && b.owner === o); }
+  foesOf(o) { return this.players.filter((p) => p.id !== o && !p.out).map((p) => p.id); }
+  mainFoe(o) {
+    const me = this.map.starts[o] || this.map.starts[0];
+    let best = null, bd = 1e9;
+    for (const f of this.foesOf(o)) { const s = this.map.starts[f]; const d = s ? distance(me.c, me.r, s.c, s.r) : 99; if (d < bd) { bd = d; best = f; } }
+    return best ?? (o === 0 ? 1 : 0);
+  }
 
   // ---------- Hilfen ----------
   i(c, r) { return r * this.W + c; }
@@ -534,11 +545,11 @@ export class Game {
   }
   canPlayCard(owner) { return this.players[owner].cardRound !== this.round && this.current === owner; }
   cardTargets(owner, id) {
-    const foe = 1 - owner, vis = (c, r) => owner !== 0 || this.visible[this.i(c, r)];
+    const vis = (c, r) => owner !== 0 || this.visible[this.i(c, r)];
     const t = CARDS[id].target;
-    if (t === 'enemyUnit') return this.units.filter((u) => !u.dead && !u.carried && u.owner === foe && vis(u.c, u.r)).map((u) => [u.c, u.r]);
-    if (t === 'enemyInf') return this.units.filter((u) => !u.dead && !u.carried && u.owner === foe && u.def.cat === 'inf' && vis(u.c, u.r)).map((u) => [u.c, u.r]);
-    if (t === 'enemyBld') return this.buildings.filter((b) => !b.dead && b.owner === foe && (owner !== 0 || this.explored[this.i(b.c, b.r)])).map((b) => [b.c, b.r]);
+    if (t === 'enemyUnit') return this.units.filter((u) => !u.dead && !u.carried && u.owner !== owner && vis(u.c, u.r)).map((u) => [u.c, u.r]);
+    if (t === 'enemyInf') return this.units.filter((u) => !u.dead && !u.carried && u.owner !== owner && u.def.cat === 'inf' && vis(u.c, u.r)).map((u) => [u.c, u.r]);
+    if (t === 'enemyBld') return this.buildings.filter((b) => !b.dead && b.owner !== owner && (owner !== 0 || this.explored[this.i(b.c, b.r)])).map((b) => [b.c, b.r]);
     if (t === 'own') return [...this.units.filter((u) => !u.dead && !u.carried && u.owner === owner).map((u) => [u.c, u.r]), ...this.buildings.filter((b) => !b.dead && b.owner === owner).map((b) => [b.c, b.r])];
     if (t === 'sandHex') { const out = []; for (let r = 0; r < this.H; r++) for (let c = 0; c < this.W; c++) if (this.isSand(c, r) && (owner !== 0 || this.explored[this.i(c, r)])) out.push([c, r]); return out; }
     if (t === 'stormHex') return ring(this.storm.next.c, this.storm.next.r, 4, this.W, this.H).filter(([c, r]) => c >= 1 && r >= 1 && c < this.W - 1 && r < this.H - 1);
@@ -549,9 +560,8 @@ export class Game {
     if (!id || !this.canPlayCard(owner)) return null;
     const card = CARDS[id];
     if (card.target !== 'none' && !this.cardTargets(owner, id).some(([a, b]) => a === c && b === r)) return null;
-    const foe = 1 - owner;
     const ev = { type: 'cardplay', owner, card: id, c, r };
-    if (id === 'stimme') { const u = this.unitAt(c, r, true) && this.unitAt(c, r, true).owner === foe ? this.unitAt(c, r, true) : this.unitAt(c, r, false); u.stunned = 1; ev.target = u.id; }
+    if (id === 'stimme') { const u = this.unitAt(c, r, true) && this.unitAt(c, r, true).owner !== owner ? this.unitAt(c, r, true) : this.unitAt(c, r, false); u.stunned = 1; ev.target = u.id; }
     else if (id === 'vorahnung') { if (owner === 0) this.revealRound = this.round; }
     else if (id === 'wetter') { this.storm.next = { c, r, dir: this.storm.next.dir }; }
     else if (id === 'klopfer') { this.thumpers.push({ c, r, owner, life: 2 }); }
@@ -1051,7 +1061,13 @@ export class Game {
       else if (!alive(0) && !this.units.some((u) => !u.dead && u.owner === 0)) this.state = 'lost';
       return this.state;
     }
-    if (!alive(1)) this.state = 'won';
+    // Ausgeschiedene KI-Spieler: keine Gebäude mehr -> Restarmee löst sich auf
+    for (const p of this.players) if (p.id > 0 && !p.out && !alive(p.id)) {
+      p.out = true;
+      for (const u of this.units) if (!u.dead && u.owner === p.id) { u.dead = true; u.gone = true; }
+      this.say(`${p.name} ist ausgeschieden!`, 'good');
+    }
+    if (this.players.every((p) => p.id === 0 || p.out)) this.state = 'won';
     else if (!alive(0) && !this.units.some((u) => !u.dead && u.owner === 0)) this.state = 'lost';
     return this.state;
   }
@@ -1059,7 +1075,7 @@ export class Game {
   // ---------- Speichern ----------
   serialize() {
     const strip = (o) => { const c = { ...o }; delete c.def; delete c.vis; delete c.anim; delete c.gone; delete c.hitFlash; delete c.recoil; delete c.forceShow; delete c.surface; delete c.crashing; delete c.aimUntil; return c; };
-    return JSON.stringify({ v: 2, seed: this.map.seed, ter: this.map.ter, spice: Array.from(this.map.spice), round: this.round, current: this.current,
+    return JSON.stringify({ v: 2, W: this.W, H: this.H, nPlayers: this.players.length, settings: this.settings || null, seed: this.map.seed, ter: this.map.ter, spice: Array.from(this.map.spice), round: this.round, current: this.current,
       players: this.players, units: this.units.filter((u) => !u.dead).map(strip), buildings: this.buildings.filter((b) => !b.dead).map(strip),
       worms: this.worms.map(strip), storm: { c: this.storm.c, r: this.storm.r, rad: this.storm.rad, dir: this.storm.dir, next: this.storm.next },
       thumpers: this.thumpers, strikes: this.strikes, wormCalls: this.wormCalls, explored: Array.from(this.explored).join(''), revealRound: this.revealRound, aiMode: this.aiMode, diffName: this.diffName, missionId: this.mission?.id || null, aiPassive: !!this.aiPassive, pois: this.pois.map((p) => p.owner) });
@@ -1067,7 +1083,7 @@ export class Game {
   static restore(map, data, diff) {
     map.ter = data.ter; map.spice = Float32Array.from(data.spice);
     const g = new Game(map, { diff });
-    g.diffName = data.diffName; g.aiPassive = data.aiPassive; g.round = data.round; g.current = 0; g.aiMode = data.aiMode; g.revealRound = data.revealRound;
+    g.diffName = data.diffName; g.aiPassive = data.aiPassive; g.round = data.round; g.current = 0; g.aiMode = data.aiMode; g.revealRound = data.revealRound; g.settings = data.settings || null;
     g.players = data.players.map((p) => ({ ...p, perk: FACTIONS[p.faction].perk || {} }));
     g.units = data.units.map((u) => ({ ...u, def: u.landed ? g.landedDef(u.type) : UNITS[u.type] }));
     g.buildings = data.buildings.map((b) => ({ ...b, def: BUILDINGS[b.type], rise: 1 }));

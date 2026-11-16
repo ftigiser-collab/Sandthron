@@ -228,3 +228,31 @@ button.purple { border-color: rgba(200,140,255,0.6); color: #e2c8ff; background:
 #confirmbox .cb-text { margin: 6px 0 14px; color: #d8cbb6; font-size: 14px; }
 #confirmbox .cb-btns { display: flex; gap: 10px; }
 #confirmbox .cb-btns button { flex: 1; }
+
+/* Overlays: Gefecht einstellen, Spielstände */
+.ovl { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; z-index: 26; background: rgba(0,0,0,0.6); opacity: 0; pointer-events: none; transition: .2s; }
+.ovl.show { opacity: 1; pointer-events: auto; }
+.ovl .box { position: relative; width: min(560px, 94vw); max-height: 92vh; overflow: auto; padding: 18px 20px; background: rgba(26,17,11,0.97); border: 1px solid var(--line); border-radius: 18px; }
+.ovl .close { position: absolute; right: 12px; top: 12px; }
+.ovl h2 { margin: 0 0 10px; color: var(--amber); }
+.ovl .m-label { margin-top: 12px; }
+.seg { display: flex; gap: 6px; flex-wrap: wrap; }
+.seg button { flex: 1; min-width: 70px; }
+.seg button.on { border-color: var(--amber); color: var(--amber); background: rgba(255,170,80,0.12); }
+.facgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.facgrid button { display: grid; grid-template-columns: 44px 1fr; gap: 2px 10px; text-align: left; align-items: center; padding: 8px; }
+.facgrid button img { grid-row: 1 / span 2; }
+.facgrid button b { font-size: 13.5px; } .facgrid button span { font-size: 11px; color: var(--dim); }
+.facgrid button.on { border-color: var(--c, var(--amber)); box-shadow: 0 0 0 1px var(--c, var(--amber)) inset; }
+.m-crests { display: flex; justify-content: center; gap: 14px; margin: 6px 0 14px; }
+.m-crests img { filter: drop-shadow(0 4px 6px rgba(0,0,0,0.5)); }
+.slot { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 10px; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; background: rgba(255,255,255,0.03); }
+.slot .sn { font-weight: 800; color: var(--amber); }
+.slot .si { font-size: 12px; color: var(--dim); }
+.slot .sb { display: flex; gap: 6px; }
+.slot .crs img { margin-right: 2px; vertical-align: middle; }
+#gamemenu { padding: 6px 10px; }
+#mycrest img { width: 22px; height: 22px; vertical-align: middle; margin-right: 6px; }
+.ovl .row { display: flex; gap: 8px; margin-top: 14px; } .ovl .row button { flex: 1; }
+#banner .b-crest { display: flex; justify-content: center; margin-bottom: 4px; }
+#banner .b-crest img { filter: drop-shadow(0 4px 8px rgba(0,0,0,0.6)); }

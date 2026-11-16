@@ -17,7 +17,8 @@
   <div id="vignette"></div>
 
   <header id="topbar">
-    <div class="brand">SANDTHRON</div>
+    <button id="gamemenu" title="Menü">☰</button>
+    <div class="brand"><span id="mycrest"></span>SANDTHRON</div>
     <div class="stat"><span class="lbl">Runde</span><b id="round">1</b></div>
     <div class="stat"><span class="lbl">Credits</span><b id="credits">0</b></div>
     <div class="stat pw"><span class="lbl">Energie</span><b id="power">0</b></div>
@@ -102,32 +103,21 @@
   </div>
 
   <div id="campaign"></div>
+  <div id="skirmish" class="ovl"></div>
+  <div id="saves" class="ovl"></div>
 
   <div id="menu">
     <div class="m-box">
       <div class="m-title">SANDTHRON</div>
       <div class="m-sub">Rundenstrategie auf einem Wüstenplaneten</div>
-      <p class="m-text">Haus Vareth gegen Haus Kordan. Erntet Glut, baut eure Basis, beherrscht den Himmel mit Ornithoptern und hütet euch vor dem, was unter dem Sand lauert.</p>
-      <div class="m-label">Fraktion</div>
-      <div class="m-fac">
-        <button data-fac="vareth" class="on" style="--c:#3fa8ff"><b>Haus Vareth</b><span>Thopter 15 % günstiger, +1 Bewegung · Sturmadler</span></button>
-        <button data-fac="kordan" style="--c:#ff4a3a"><b>Haus Kordan</b><span>Fahrzeuge +12 % Schaden, Gebäude +20 % stabiler · Brenner</span></button>
-        <button data-fac="ossar" style="--c:#5fe07a"><b>Ossar-Syndikat</b><span>Infanterie +1 Bewegung, Drops 30 % günstiger · Schattenklinge</span></button>
-        <button data-fac="sandvolk" style="--c:#e3b341"><b>Sandvolk</b><span>Sandvolk-Einheiten 30 % günstiger und +1 Bewegung · Wurmreiter</span></button>
-      </div>
-      <div class="m-label">Schwierigkeit</div>
-      <div class="m-diff">
-        <button data-diff="leicht">Leicht</button>
-        <button data-diff="normal" class="on">Normal</button>
-        <button data-diff="schwer">Schwer</button>
-      </div>
-      <div class="m-label">Karte (optional)</div>
-      <input id="seed" placeholder="Zufällig — oder Zahl/Wort eingeben" autocomplete="off">
+      <p class="m-text">Vier Häuser ringen um den Sandthron. Erntet Glut, baut eure Basis, beherrscht den Himmel mit Ornithoptern und hütet euch vor dem, was unter dem Sand lauert.</p>
+      <div class="m-crests" id="mcrests"></div>
       <button id="campaignbtn" class="primary big">Kampagne</button>
       <button id="start" class="big">Freies Gefecht</button>
+      <button id="loadbtn" class="big">Spielstände</button>
       <button id="continue" class="big" style="display:none">Fortsetzen</button>
       <div class="loading">Die Wüste entsteht …</div>
-      <div class="m-ver">Stufe 2 · Prototyp</div>
+      <div class="m-ver">Stufe 3 · Prototyp</div>
     </div>
   </div>
 </div>

@@ -5,6 +5,8 @@ import { icon, cardArt } from './sprites.js';
 import { angDiff } from './util.js';
 import { aiTurn, autoHarvest, autoCarry } from './ai.js';
 import { shipKind } from './shipart.js';
+import { crestImg } from './crest.js';
+import { SLOTS, slotMeta, writeSlot } from './saves.js';
 
 const $ = (s) => document.querySelector(s);
 const ARMOR_NAME = { inf: 'Infanterie', light: 'Leicht', heavy: 'Schwer', air: 'Luft', bld: 'Gebäude' };
@@ -643,9 +645,9 @@ export class Controller {
 
   pulse(sel) { const el = $(sel); if (!el) return; el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse'); }
 
-  async banner(text, sub = '', dur = 1.1) {
+  async banner(text, sub = '', dur = 1.1, crest = null) {
     const el = $('#banner');
-    el.innerHTML = `<div class="b-main">${text}</div>${sub ? `<div class="b-sub">${sub}</div>` : ''}`;
+    el.innerHTML = `${crest ? `<div class="b-crest">${crestImg(crest, 64)}</div>` : ''}<div class="b-main">${text}</div>${sub ? `<div class="b-sub">${sub}</div>` : ''}`;
     el.classList.add('show');
     await this.wait(dur);
     el.classList.remove('show');
@@ -918,13 +920,16 @@ export class Controller {
     if (this.checkEnd()) return;
     await this.playEvents(g.wormPhase());
     if (this.checkEnd()) return;
-    const foe = g.players[1];
-    await this.banner(foe.name, 'ist am Zug', 0.9);
-    g.current = 1;
-    await this.playEvents(g.beginTurn(1));
-    await aiTurn(g, this.actAnimated, 1);
-    await this.playEvents(g.endTurnEvents(1));
-    if (this.checkEnd()) return;
+    // Alle KI-Häuser nacheinander; Würmer ziehen nach dem letzten erneut
+    for (const foe of g.players) {
+      if (foe.id === 0 || foe.out) continue;
+      await this.banner(foe.name, 'ist am Zug', 0.9, foe.faction);
+      g.current = foe.id;
+      await this.playEvents(g.beginTurn(foe.id));
+      await aiTurn(g, this.actAnimated, foe.id);
+      await this.playEvents(g.endTurnEvents(foe.id));
+      if (this.checkEnd()) return;
+    }
     await this.playEvents(g.wormPhase());
     g.updateVision(); this.r.fogDirty = true;
     if (this.checkEnd()) return;
@@ -935,7 +940,7 @@ export class Controller {
     await this.playEvents(g.beginTurn(0));
     g.updateVision(); this.r.fogDirty = true;
     this.refresh();
-    await this.banner(`Runde ${g.round}`, g.isNight() ? 'Euer Zug · Nacht: Bodensicht −1' : 'Euer Zug', 0.9);
+    await this.banner(`Runde ${g.round}`, g.isNight() ? 'Euer Zug · Nacht: Bodensicht −1' : 'Euer Zug', 0.9, g.players[0].faction);
     if (this.rallyUnits().some((u) => u.rally)) { this.busy = false; await this.rallyStep(); }
     this.busy = false;
     $('#endturn').disabled = false;
@@ -963,6 +968,30 @@ export class Controller {
     try { localStorage.removeItem('sandthron-save'); } catch (e) {}
     this.onEnd?.();
     return true;
+  }
+
+  // Spielmenü: Speichern in fünf Plätze, Laden, Hauptmenü
+  showGameMenu() {
+    const g = this.g, el = $('#saves');
+    const crests = (m) => m.factions.map((f, i) => `<span style="opacity:${m.out && m.out[i] ? 0.3 : 1}">${crestImg(f, 22)}</span>`).join('');
+    let html = `<div class="box"><button class="close">×</button><h2>Spielmenü</h2>
+      <div class="si" style="margin-bottom:10px">${g.players.map((p) => `<span style="opacity:${p.out ? 0.35 : 1};margin-right:10px">${crestImg(p.faction, 22)} ${p.name}${p.out ? ' (ausgeschieden)' : ''}</span>`).join('')}</div>
+      <div class="m-label">Speichern</div>`;
+    for (let k = 1; k <= SLOTS; k++) {
+      const m = slotMeta(k);
+      html += `<div class="slot"><span class="sn">${k}</span><div>${m ? `<div class="crs">${crests(m)}</div><div class="si">Runde ${m.round} · Karte ${m.size} · ${m.date}</div>` : '<div class="si">Leer</div>'}</div>
+        <div class="sb"><button class="primary" data-save="${k}" ${this.busy || g.current !== 0 ? 'disabled' : ''}>${m ? 'Überschreiben' : 'Speichern'}</button>${m ? `<button data-load="${k}">Laden</button>` : ''}</div></div>`;
+    }
+    html += `<div class="row"><button data-a="menu">Hauptmenü</button><button class="primary" data-a="back">Weiterspielen</button></div></div>`;
+    el.innerHTML = html; el.classList.add('show');
+    const close = () => el.classList.remove('show');
+    el.querySelector('.close').onclick = close; el.querySelector('[data-a="back"]').onclick = close;
+    el.querySelector('[data-a="menu"]').onclick = () => { this.save(); location.reload(); };
+    el.querySelectorAll('[data-save]').forEach((b) => b.onclick = () => {
+      if (writeSlot(+b.dataset.save, g)) { this.flash(`Gespeichert in Platz ${b.dataset.save}`); this.showGameMenu(); }
+      else this.flash('Speichern fehlgeschlagen (Speicher voll?)');
+    });
+    el.querySelectorAll('[data-load]').forEach((b) => b.onclick = () => { try { sessionStorage.setItem('sandthron-load-slot', b.dataset.load); } catch {} location.reload(); });
   }
 
   // Warnung, wenn noch Einheiten nicht bewegt wurden
@@ -1061,6 +1090,8 @@ export class Controller {
   bindDom() {
     $('#endturn').onclick = () => this.requestEndTurn();
     $('#nextunit').onclick = () => this.nextUnit();
+    $('#gamemenu').onclick = () => this.showGameMenu();
+    $('#mycrest').innerHTML = crestImg(this.g.players[0].faction, 22);
     $('#helpbtn').onclick = () => $('#help').classList.toggle('show');
     $('#cardsbtn').onclick = () => this.showCards();
     $('#help').onclick = (e) => { if (e.target.id === 'help' || e.target.classList.contains('close')) $('#help').classList.remove('show'); };

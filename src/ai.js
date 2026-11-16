@@ -131,7 +131,7 @@ export async function autoCarry(g, car, act) {
 
 // ---------- KI-Zug ----------
 export async function aiTurn(g, act, owner = 1) {
-  const enemy = 1 - owner;
+  const enemy = g.mainFoe(owner);
   aiEndgame(g, owner);
   // Für den Entscheidungsschlag sparen, sobald er in Reichweite ist (keine Drops, Schläge, Neubauten außer Energie)
   const pl = g.players[owner], eg = g.endgameDef(owner);
@@ -146,7 +146,8 @@ export async function aiTurn(g, act, owner = 1) {
   const home = myB.find((b) => b.type === 'bauhof') || myB[0];
   const enemyB = g.buildings.filter((b) => !b.dead && b.owner === enemy);
   const enemyU = g.units.filter((u) => !u.dead && u.owner === enemy && !u.carried);
-  const threats = enemyU.filter((e) => myB.some((b) => distance(b.c, b.r, e.c, e.r) <= 6));
+  // Bedrohungen kommen von allen Gegnern
+  const threats = g.units.filter((e) => !e.dead && !e.carried && e.owner !== owner && myB.some((b) => distance(b.c, b.r, e.c, e.r) <= 6));
   const army = mine.filter((u) => g.weapon(u) && !u.def.harvester);
   const diff = g.diff || { wave: 5, firstAttack: 7 };
   const wave = diff.wave + Math.floor(g.round / 6);
@@ -297,7 +298,7 @@ export function aiBuild(g, owner) {
   if (!g.prereqOk(owner, def) || p.credits < def.cost) return;
   const hexes = g.buildHexes(owner, want);
   if (!hexes.length) return;
-  const home = g.map.starts[owner], foe = g.map.starts[1 - owner];
+  const home = g.map.starts[owner], foe = g.map.starts[g.mainFoe(owner)];
   let best = null, bs = -Infinity;
   for (const [c, r] of hexes) {
     let s = -distance(c, r, home.c, home.r) * 2 + g.rnd() * 1.5;
@@ -362,9 +363,8 @@ export function aiProduce(g, owner) {
 async function aiCards(g, act, owner) {
   const p = g.players[owner];
   if (!p.cards.length || !g.canPlayCard(owner)) return;
-  const foe = 1 - owner;
   const myB = g.buildings.filter((b) => !b.dead && b.owner === owner);
-  const foeU = g.units.filter((u) => !u.dead && !u.carried && u.owner === foe);
+  const foeU = g.units.filter((u) => !u.dead && !u.carried && u.owner !== owner);
   const near = (e, d) => myB.some((b) => distance(b.c, b.r, e.c, e.r) <= d);
   for (let i = 0; i < p.cards.length; i++) {
     const id = p.cards[i];
@@ -372,7 +372,7 @@ async function aiCards(g, act, owner) {
     if (id === 'gilde') tgt = [0, 0];
     else if (id === 'stimme') { const u = foeU.filter((u) => near(u, 7)).sort((a, b) => value(g, b) - value(g, a))[0]; if (u && value(g, u) >= 350) tgt = [u.c, u.r]; }
     else if (id === 'klopfer') { const h = foeU.find((u) => u.def.harvester && g.isSand(u.c, u.r)) || foeU.filter((u) => g.isSand(u.c, u.r) && u.def.mt !== 'air').sort((a, b) => value(g, b) - value(g, a))[0]; if (h && g.worms.some((w) => distance(w.c, w.r, h.c, h.r) <= 12)) tgt = [h.c, h.r]; }
-    else if (id === 'sabotage') { const b = g.buildings.find((b) => !b.dead && b.owner === foe && ['fabrik', 'horst', 'windfalle'].includes(b.type)); if (b) tgt = [b.c, b.r]; }
+    else if (id === 'sabotage') { const b = g.buildings.find((b) => !b.dead && b.owner !== owner && ['fabrik', 'horst', 'windfalle'].includes(b.type)); if (b) tgt = [b.c, b.r]; }
     else if (id === 'verrat') { const u = foeU.filter((u) => u.def.mt === 'foot').sort((a, b) => value(g, b) - value(g, a))[0]; if (u) tgt = [u.c, u.r]; }
     else if (id === 'schild') { const threatened = foeU.some((u) => near(u, 5)); const bh = myB.find((b) => b.type === 'bauhof'); if (threatened && bh) tgt = [bh.c, bh.r]; }
     else if (id === 'wetter') {
@@ -392,7 +392,7 @@ function aiDrop(g, owner, mode, enemyB) {
   let id = mode === 'attack' ? (g.rnd() < 0.5 ? 'panzer' : 'elite') : harvesters < 2 ? 'ernter' : 'trupp';
   if (p.credits < g.dropCost(owner, id) + 400) { id = 'trupp'; if (p.credits < g.dropCost(owner, id) + 400) return; }
   const hexes = g.orbitalHexes(owner);
-  const home = g.map.starts[owner], foeHome = g.map.starts[1 - owner];
+  const home = g.map.starts[owner], foeHome = g.map.starts[g.mainFoe(owner)];
   let best = null, bs = -Infinity;
   for (const [c, r] of hexes) {
     let s;
