@@ -269,6 +269,22 @@ const THOPTER = {
     seams(c, [[0, -5.3, 0, 5.3], [-5, -5.1, -5, 5.1]]); rivetRow(c, -8, -4.6, 8, -5.2, 7, 0.3); rivetRow(c, -8, 4.6, 8, 5.2, 7, 0.3);
     c.fillStyle = color; c.fillRect(-9, -1.4, 6, 2.8);
   } },
+  // Ernte-Träger: breiter H-Rahmen mit offener Ladebucht für einen Ernter, vier Flügelnaben an den Holmen
+  erntetraeger: { size: [66, 40], wings: [[11, 13, 21, 5.2], [-13, 13, 21, 5.2]], rootW: 4, rate: 12, scale: 1.18, open: true, body(c, color) {
+    tailBoom(c, -19, 12, 2.6, color);
+    for (const sy of [-1, 1]) {
+      hullBlock(c, -21, 19, 3.6, 3.2);
+      c.save(); c.translate(0, sy * 13); hullBlock(c, -20, 18, 2.8, 2.6); c.restore();
+      c.fillStyle = HULL_D; c.fillRect(-17, sy * 13 - 1, 33, 2);
+      c.fillStyle = '#d9a33a'; for (const x of [-12, 0, 12]) c.fillRect(x - 1.2, sy * 9.6 - 1, 2.4, 2);
+      rivetRow(c, -18, sy * 15.2, 16, sy * 15.2, 9, 0.3);
+    }
+    c.save(); c.globalCompositeOperation = 'destination-out'; c.fillRect(-15, -9, 27, 18); c.restore();
+    for (const x of [-17, 15]) { c.fillStyle = HULL_M; c.fillRect(x - 1.6, -14, 3.2, 28); c.fillStyle = 'rgba(0,0,0,0.35)'; c.fillRect(x + 0.6, -14, 1, 28); }
+    hazard(c, -17, -14, 3.2, 28);
+    canopy(c, 17, 10, 8);
+    c.fillStyle = color; c.fillRect(-22, -1.4, 5, 2.8);
+  } },
   // Träger: langer Rahmen mit Lastklammern, große Flügel
   traeger: { size: [62, 28], wings: [[6, 4.5, 22, 5], [-7, 4.5, 21, 5]], rootW: 4.5, rate: 13, scale: 1.12, body(c, color) {
     tailBoom(c, -11, 15, 2.6, color);
@@ -290,7 +306,7 @@ function angWing(c, side, len, chord, f, sweep, alpha, ghost = false) {
   c.save(); c.rotate(side * sweep);
   const P = [[-w * 0.5, 0], [-w * 0.62, side * L * 0.15], [-w * 0.5, side * L * 0.96], [-w * 0.1, side * L], [w * 0.45, side * L * 0.93], [w * 0.55, side * L * 0.12], [w * 0.4, 0]];
   const path = () => { c.beginPath(); P.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); };
-  if (ghost) { c.fillStyle = `rgba(150,146,136,${0.16 * alpha})`; path(); c.fill(); c.restore(); return; }
+  if (ghost) { c.fillStyle = `rgba(160,155,144,${0.22 * alpha})`; path(); c.fill(); c.restore(); return; }
   const g = c.createLinearGradient(-w, 0, w, 0);
   g.addColorStop(0, `rgba(196,190,176,${alpha})`); g.addColorStop(0.5, `rgba(150,145,134,${alpha})`); g.addColorStop(1, `rgba(92,88,80,${alpha})`);
   c.fillStyle = g; path(); c.fill();
@@ -309,24 +325,22 @@ function thopterArt(ctx, u, color, t, o, kind) {
   const z = o.z ?? 26, sc = def.scale, bank = o.bank || 0;
   // Viele kleine Flügel: je Wurzel ein Fächer aus drei schmalen Flügeln, jeder mit eigenem Takt
   const wl = wingList(def);
-  const fl = (w, side) => o.landed ? 0.92 : 0.25 + 0.75 * Math.abs(Math.cos(t * def.rate * w.rate + u.id + w.off + (side > 0 ? 0.9 : 0)));
+  // Starrer Flügelschlag: Blätter behalten ihre Länge und schwingen um die Nabe vor und zurück
+  const PH = (w, side) => t * def.rate * w.rate + u.id + w.off + (side > 0 ? 0.9 : 0);
+  const swing = (w, side, dp = 0) => o.landed ? 0.95 : Math.sin(PH(w, side) - dp) * 0.42;
+  const fl = () => 1;
   const drawWings = (alpha) => {
     for (const side of [-1, 1]) {
       const lean = 1 - side * bank * 0.3;
       for (const w of wl) {
-        const f = fl(w, side);
-        // Schlieren: das Blatt an zwei früheren Schlagpositionen, sehr blass
-        if (!o.landed) for (const d of [0.22, 0.44]) c2(ctx, () => { ctx.translate(w.x, side * w.y); angWing(ctx, side, w.len * lean, w.chord, Math.min(1, f + d * (f < 0.6 ? 1 : -1)), w.sw + side * d * 0.25, alpha, true); });
-        c2(ctx, () => { ctx.translate(w.x, side * w.y); angWing(ctx, side, w.len * lean, w.chord, f, o.landed ? w.sw + 0.95 : w.sw, alpha); });
+        // Bewegungsunschärfe: das starre Blatt an früheren Schlagwinkeln, blass
+        if (!o.landed) for (const dp of [0.35, 0.7, 1.05]) c2(ctx, () => { ctx.translate(w.x, side * w.y); angWing(ctx, side, w.len * lean, w.chord, 1, w.sw + swing(w, side, dp), alpha * (1.2 - dp), true); });
+        // Licht auf dem Blatt wechselt mit der Neigung
+        const tilt = o.landed ? 1 : 0.82 + 0.18 * Math.cos(PH(w, side));
+        c2(ctx, () => { ctx.translate(w.x, side * w.y); angWing(ctx, side, w.len * lean, w.chord, 1, w.sw + swing(w, side), alpha * tilt); });
       }
       // Flügelnaben
       for (const [x, rootY] of def.wings) { ctx.fillStyle = '#3a3630'; ctx.beginPath(); ctx.arc(x, side * rootY, 1.4, 0, 6.28); ctx.fill(); ctx.fillStyle = '#8a8478'; ctx.beginPath(); ctx.arc(x - 0.3, side * rootY - 0.3, 0.7, 0, 6.28); ctx.fill(); }
-      // Bewegungsunschärfe als Fächer je Wurzel
-      if (!o.landed) for (const [x, rootY, len, , sw0] of def.wings) {
-        const sw = sw0 ?? 0.15;
-        ctx.save(); ctx.translate(x, side * rootY); ctx.fillStyle = `rgba(170,164,150,${0.07 * alpha})`;
-        ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, len * 0.8 * lean, side > 0 ? 1.0 - sw : -2.15 + sw, side > 0 ? 2.15 - sw : -1.0 + sw); ctx.closePath(); ctx.fill(); ctx.restore();
-      }
     }
   };
   // Bodenschatten
@@ -334,12 +348,13 @@ function thopterArt(ctx, u, color, t, o, kind) {
   ctx.globalAlpha *= Math.max(0.1, 0.3 - z * 0.003);
   ctx.drawImage(p.sh, -p.w / 2, -p.h / 2, p.w, p.h);
   ctx.globalCompositeOperation = 'source-over'; ctx.filter = 'none';
-  const sa = ctx.globalAlpha; ctx.globalAlpha = sa * 0.6; drawWingsShadow(ctx, wl, fl); ctx.globalAlpha = sa;
+  const sa = ctx.globalAlpha; ctx.globalAlpha = sa * 0.6; drawWingsShadow(ctx, wl, swing); ctx.globalAlpha = sa;
   ctx.restore();
   // Maschine
   ctx.save(); ctx.translate(0, -z); ctx.rotate(u.facing); ctx.scale(sc, sc);
   if (bank) ctx.scale(1, 1 - Math.abs(bank) * 0.22);
   if (kind === 'traeger' && o.carry) { ctx.save(); ctx.translate(0, 0); ctx.scale(0.62, 0.62); ctx.rotate(-u.facing); o.carry(); ctx.restore(); }
+  if (kind === 'erntetraeger' && o.carry) { ctx.save(); ctx.scale(0.46, 0.46); ctx.rotate(-u.facing); o.carry(); ctx.restore(); }
   drawPartShadow(ctx, p, 1.2, 1.6, 0.25);
   drawPart(ctx, p);
   if (kind === 'falke' || kind === 'bomber' || kind === 'adler') {
@@ -363,12 +378,12 @@ function wingList(def) {
   WL.set(def, out);
   return out;
 }
-function drawWingsShadow(ctx, wl, fl) {
+function drawWingsShadow(ctx, wl, swing) {
   ctx.fillStyle = '#000';
   for (const side of [-1, 1]) for (const w of wl) {
-    const L = w.len * fl(w, side);
-    ctx.save(); ctx.translate(w.x, side * w.y); ctx.rotate(side * w.sw);
-    ctx.beginPath(); ctx.moveTo(-w.chord * 0.4, 0); ctx.lineTo(-w.chord * 0.5, side * L); ctx.lineTo(w.chord * 0.35, side * L * 0.9); ctx.lineTo(w.chord * 0.4, 0); ctx.closePath(); ctx.fill();
+    const L = w.len;
+    ctx.save(); ctx.translate(w.x, side * w.y); ctx.rotate(side * (w.sw + swing(w, side)));
+    ctx.beginPath(); ctx.moveTo(-w.chord * 0.4, 0); ctx.lineTo(-w.chord * 0.45, side * L); ctx.lineTo(w.chord * 0.4, side * L * 0.93); ctx.lineTo(w.chord * 0.4, 0); ctx.closePath(); ctx.fill();
     ctx.restore();
   }
 }
@@ -425,5 +440,6 @@ export const VDRAW = {
   bomber(ctx, u, color, t, o) { thopterArt(ctx, u, color, t, o, 'bomber'); },
   jaeger(ctx, u, color, t, o) { thopterArt(ctx, u, color, t, o, 'jaeger'); },
   traeger(ctx, u, color, t, o) { thopterArt(ctx, u, color, t, o, 'traeger'); },
+  erntetraeger(ctx, u, color, t, o) { thopterArt(ctx, u, color, t, o, 'erntetraeger'); },
   adler(ctx, u, color, t, o) { thopterArt(ctx, u, color, t, o, 'adler'); },
 };

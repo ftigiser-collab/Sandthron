@@ -1343,7 +1343,7 @@ export class Controller {
     } else if (b.def.produces) {
       title = b.producing ? `In Produktion: ${UNITS[b.producing].name}` : p.low ? 'Energie zu niedrig für Produktion' : 'Produzieren (fertig nächste Runde)';
       for (const [t, d] of Object.entries(UNITS)) {
-        if (d.cat !== b.def.produces) continue;
+        if (d.cat !== b.def.produces || d.noBuild) continue;
         if (d.faction && d.faction !== p.faction) continue;
         const pre = g.prereqOk(0, d);
         const missing = pre ? '' : 'Benötigt: ' + d.prereq.filter((x) => !g.has(0, x)).map((x) => BUILDINGS[x].name).join(', ');

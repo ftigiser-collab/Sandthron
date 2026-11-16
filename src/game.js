@@ -773,7 +773,7 @@ export class Game {
 
   // ---------- Thopter-Transport ----------
   canPickup(carrier, t) {
-    return carrier.def.carrier && !carrier.carrying && !carrier.acted && t && !t.acted && t.isUnit !== undefined && t.isUnit && t.owner === carrier.owner && t.def.mt !== 'air' && !t.carried && distance(carrier.c, carrier.r, t.c, t.r) <= 1;
+    return carrier.def.carrier && !(carrier.def.harvOnly && !(t && t.def.harvester)) && !carrier.carrying && !carrier.acted && t && !t.acted && t.isUnit !== undefined && t.isUnit && t.owner === carrier.owner && t.def.mt !== 'air' && !t.carried && distance(carrier.c, carrier.r, t.c, t.r) <= 1;
   }
   pickup(carrier, t) {
     carrier.carrying = t.id; t.carried = true; t.c = carrier.c; t.r = carrier.r; t.moved = true; t.acted = true;
