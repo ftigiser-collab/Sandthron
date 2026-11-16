@@ -1,5 +1,5 @@
 // Vorgerenderte Teile mit Materialeffekten: Kanten-Glanz, Schattenkanten, Schmutz, Staub
-const SCALE = 4;
+const SCALE = Math.min(6, Math.max(5, Math.round(2.2 * ((typeof devicePixelRatio !== "undefined" && devicePixelRatio) || 1))));
 const cache = new Map();
 let noiseCv = null;
 
@@ -37,11 +37,11 @@ function edgeBand(sil, dx, dy, color) {
 }
 
 // Material auf eine Ebene anwenden
-function material(cv, o) {
+function material(cv, o, SC = SCALE) {
   const ctx = cv.getContext('2d'), w = cv.width, h = cv.height;
   const sil = mk(w, h), sc = sil.getContext('2d');
   sc.drawImage(cv, 0, 0); sc.globalCompositeOperation = 'source-in'; sc.fillStyle = '#fff'; sc.fillRect(0, 0, w, h);
-  const b = (o.bevel ?? 1) * SCALE;
+  const b = (o.bevel ?? 1) * SC;
   ctx.save();
   ctx.globalCompositeOperation = 'source-atop';
   if (o.grime !== 0) {
@@ -64,14 +64,14 @@ function material(cv, o) {
 }
 
 // Ein Teil vorrendern: draw(L) — L(fn, opts) zeichnet eine Ebene mit eigenem Material
-export function part(key, w, h, draw) {
+export function part(key, w, h, draw, SC = SCALE) {
   if (cache.has(key)) return cache.get(key);
-  const cv = mk(w * SCALE, h * SCALE), ctx = cv.getContext('2d');
+  const cv = mk(w * SC, h * SC), ctx = cv.getContext('2d');
   const L = (fn, o = {}) => {
     const lc = mk(cv.width, cv.height), l = lc.getContext('2d');
-    l.setTransform(SCALE, 0, 0, SCALE, cv.width / 2, cv.height / 2);
+    l.setTransform(SC, 0, 0, SC, cv.width / 2, cv.height / 2);
     fn(l);
-    if (!o.flat) material(lc, o);
+    if (!o.flat) material(lc, o, SC);
     ctx.drawImage(lc, 0, 0);
   };
   draw(L);

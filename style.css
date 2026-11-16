@@ -105,9 +105,12 @@ button.wide { width: 100%; margin-top: 8px; }
 
 #menu { background: radial-gradient(ellipse at 50% 30%, #6b3f1d 0%, #2a170b 55%, #120a05 100%); transition: opacity .5s; }
 #menu.hide { opacity: 0; pointer-events: none; }
+.menubg { position: absolute; inset: 0; z-index: 0; }
+#menu > .m-box { z-index: 1; }
+#menu::before { z-index: 0; pointer-events: none; }
 #menu::before { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(170deg, rgba(255,190,120,0.04) 0 2px, transparent 2px 22px); }
-.m-box { position: relative; width: min(440px, 92vw); padding: 28px 26px; text-align: center; background: rgba(20,12,7,0.6); border: 1px solid var(--line); border-radius: 20px; backdrop-filter: blur(6px); }
-.m-title { font-size: 44px; font-weight: 900; letter-spacing: .3em; padding-left: .3em; color: var(--amber); text-shadow: 0 4px 30px rgba(255,140,50,0.55); }
+.m-box { position: relative; width: min(440px, 92vw); padding: 28px 26px; text-align: center; background: rgba(20,12,7,0.68); border: 1px solid var(--line); border-radius: 20px; backdrop-filter: blur(6px); }
+.m-title { font-size: clamp(28px, 8.5vw, 40px); font-weight: 900; letter-spacing: .22em; padding-left: .22em; color: var(--amber); text-shadow: 0 4px 30px rgba(255,140,50,0.55); }
 .m-sub { color: var(--dim); letter-spacing: .14em; text-transform: uppercase; font-size: 12px; margin-bottom: 14px; }
 .m-text { color: #e4d3bd; font-size: 14px; margin: 0 0 18px; }
 .m-label { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--dim); margin: 10px 0 6px; }

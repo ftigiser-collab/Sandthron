@@ -3,6 +3,7 @@ import { center, hexPath, R, HW, ring, distance, pixelToHex } from './hex.js';
 import { drawUnit, drawBuilding, drawWormSign, drawWormMaw, drawPod, drawThumper, drawSandWhirl, drawWormRidge } from './sprites.js';
 import { WORM_SIZES } from './data.js';
 import { clamp, rgba, Noise, smoothstep } from './util.js';
+import { tintedBlob } from './fx.js';
 
 const FILTER_OK = (() => { try { const c = document.createElement('canvas').getContext('2d'); c.filter = 'blur(2px)'; return c.filter === 'blur(2px)'; } catch { return false; } })();
 
@@ -363,8 +364,10 @@ export class Renderer {
       const glow = (x, y, r, col, al) => { const gr = ctx.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(${col},${al})`); gr.addColorStop(1, `rgba(${col},0)`); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.28); ctx.fill(); };
       for (const b of bs) {
         const p = this.posOf(b);
-        glow(p.x, p.y, 46, '255,190,110', 0.28 * a);
-        for (let k = 0; k < 3; k++) glow(p.x - 12 + k * 12, p.y + 6, 6, '255,220,150', (0.5 + 0.3 * Math.sin(this.t * 3 + k + b.id)) * a);
+        glow(p.x + 4, p.y + 10, 50, '255,180,100', 0.22 * a);
+        glow(p.x - 6, p.y - 4, 18, '255,215,150', 0.18 * a);
+        const blink = (this.t * 0.9 + b.id * 0.37) % 1 < 0.12;
+        if (blink) glow(p.x + 26, p.y - 26, 6, '255,60,50', 0.95 * a);
       }
       for (const u of units) {
         const p = this.posOf(u);
@@ -373,15 +376,25 @@ export class Renderer {
           glow(p.x - 9, p.y - z, 5, blink ? '255,60,60' : '60,255,120', 0.9 * a);
           glow(p.x, p.y - z, 30, '200,220,255', 0.12 * a);
         } else if (u.def.cat === 'veh') {
-          const hx = p.x + Math.cos(u.facing) * 30, hy = p.y + Math.sin(u.facing) * 30;
-          glow(hx, hy, 26, '255,240,200', 0.22 * a);
+          // Scheinwerferkegel
+          ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(u.facing);
+          const cone = ctx.createLinearGradient(8, 0, 64, 0); cone.addColorStop(0, `rgba(255,240,205,${0.3 * a})`); cone.addColorStop(1, 'rgba(255,240,205,0)');
+          ctx.fillStyle = cone; ctx.beginPath(); ctx.moveTo(10, -5); ctx.lineTo(64, -24); ctx.quadraticCurveTo(72, 0, 64, 24); ctx.lineTo(10, 5); ctx.closePath(); ctx.fill();
+          ctx.restore();
+          glow(p.x + Math.cos(u.facing) * 12, p.y + Math.sin(u.facing) * 12, 5, '255,250,230', 0.8 * a);
         } else glow(p.x, p.y, 14, '255,200,140', 0.15 * a);
       }
-      // Glut leuchtet nachts
-      for (let r = 0; r < this.g.H; r++) for (let c = 0; c < this.g.W; c++) {
-        if (this.g.spiceAt(c, r) <= 0 || !this.g.explored[this.g.i(c, r)]) continue;
-        const p = center(c, r); if (p.x < v.x0 || p.x > v.x1 || p.y < v.y0 || p.y > v.y1) continue;
-        glow(p.x, p.y, 34, '255,120,50', 0.14 * a);
+      // Glut leuchtet nachts aus ihren Adern
+      if (this.spiceLayer) { ctx.globalAlpha = 0.22 * a * (0.85 + 0.15 * Math.sin(this.t * 1.3)); ctx.drawImage(this.spiceLayer, 0, 0); ctx.globalAlpha = 1; }
+      // Suchscheinwerfer auf Wachtürmen
+      for (const b of bs) {
+        if (b.type !== 'turm' && b.type !== 'ausguck' && b.type !== 'flak') continue;
+        const p = this.posOf(b), ang = this.t * 0.5 + b.id * 1.7;
+        ctx.save(); ctx.translate(p.x, p.y - 8); ctx.rotate(ang);
+        const sl = ctx.createLinearGradient(0, 0, 150, 0); sl.addColorStop(0, `rgba(225,235,255,${0.32 * a})`); sl.addColorStop(1, 'rgba(225,235,255,0)');
+        ctx.fillStyle = sl; ctx.beginPath(); ctx.moveTo(0, -2); ctx.lineTo(150, -22); ctx.lineTo(150, 22); ctx.lineTo(0, 2); ctx.closePath(); ctx.fill();
+        ctx.restore();
+        glow(p.x + Math.cos(ang) * 130, p.y - 8 + Math.sin(ang) * 130, 22, '225,235,255', 0.18 * a);
       }
     }
     ctx.globalCompositeOperation = 'source-over';
@@ -602,6 +615,16 @@ export class Renderer {
     const gr = ctx.createRadialGradient(cpos.x, cpos.y, radPx * 0.2, cpos.x, cpos.y, radPx);
     gr.addColorStop(0, 'rgba(140,88,45,0.72)'); gr.addColorStop(0.7, 'rgba(165,105,55,0.5)'); gr.addColorStop(1, 'rgba(170,110,60,0)');
     ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(cpos.x, cpos.y, radPx, 0, 6.28); ctx.fill();
+    // Wolkenwände in Spiralarmen
+    if (!this.stormClouds) this.stormClouds = Array.from({ length: 46 }, (_, i) => ({ arm: i % 3, d: 0.15 + Math.random() * 0.9, a: Math.random() * 6.28, sz: 0.5 + Math.random() * 0.8, v: i % 6, col: ['214,168,112', '176,120,70', '140,92,54'][i % 3] }));
+    for (const q of this.stormClouds) {
+      q.a += 0.006 * (1.6 - q.d);
+      const ang = q.a + q.arm * 2.094 + q.d * 2.6, d = q.d * radPx, x = cpos.x + Math.cos(ang) * d, y = cpos.y + Math.sin(ang) * d * 0.85;
+      const r = (26 + 30 * q.sz) * (0.6 + q.d * 0.6);
+      ctx.globalAlpha = 0.62 * (1 - Math.max(0, q.d - 0.85) * 4);
+      ctx.save(); ctx.translate(x, y); ctx.rotate(ang * 1.5); ctx.drawImage(tintedBlob(q.col, q.v), -r, -r, r * 2, r * 2); ctx.restore();
+    }
+    ctx.globalAlpha = 1;
     if (Math.random() < 0.025) {
       const a = Math.random() * 6.28, d = Math.random() * radPx * 0.7;
       let x = cpos.x + Math.cos(a) * d, y = cpos.y + Math.sin(a) * d - 30;
@@ -619,7 +642,7 @@ export class Renderer {
       }
     }
     ctx.globalCompositeOperation = 'source-over';
-    ctx.strokeStyle = 'rgba(230,190,140,0.35)'; ctx.lineWidth = 1.5;
+    ctx.strokeStyle = 'rgba(235,200,150,0.3)'; ctx.lineWidth = 1.2;
     for (const q of this.stormParticles) {
       q.a += 0.02 * q.s * (1.4 - q.d);
       const d = q.d * radPx, x = cpos.x + Math.cos(q.a) * d, y = cpos.y + Math.sin(q.a) * d * 0.85;

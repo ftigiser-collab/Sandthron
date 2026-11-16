@@ -7,6 +7,9 @@ import { FX } from './fx.js';
 import { DIFFICULTY } from './data.js';
 import { center } from './hex.js';
 import { MISSIONS, campaignProgress, setProgress, missionById } from './campaign.js';
+import { startMenuBg } from './menubg.js';
+let menuBg = null;
+try { menuBg = startMenuBg(document.getElementById('menu')); } catch (e) { console.warn(e); }
 
 const $ = (s) => document.querySelector(s);
 let diff = 'normal', faction = 'vareth';
@@ -79,6 +82,7 @@ async function start(save, mission) {
   renderer.cam.z = window.innerWidth < 700 ? 0.8 : 1.05;
   renderer.centerOn(home.x + 60, home.y + 40, false);
   $('#menu').classList.add('hide');
+  if (menuBg) { const b = menuBg; menuBg = null; setTimeout(() => b.stop(), 600); }
   $('#seedinfo').textContent = `Karte ${seed}`;
   let last = performance.now();
   const loop = (now) => {

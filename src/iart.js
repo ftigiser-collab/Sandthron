@@ -71,13 +71,13 @@ function trooper(c, sp, color) {
 }
 
 function trooperPart(type, color) {
-  return part(`in-${type}-${color}`, 30, 22, (L) => L((c) => trooper(c, S[type], color), { bevel: 0.32, grime: 0.3, light: 0.55, shade: 0.5, rim: false }));
+  return part(`in-${type}-${color}`, 30, 22, (L) => L((c) => trooper(c, S[type], color), { bevel: 0.32, grime: 0.3, light: 0.55, shade: 0.5, rim: false }), 7);
 }
 
 function legs(c, x, y, a, t, moving, col) {
   const st = moving ? Math.sin(t * 13 + x * 0.7 + y) * 3 : 0.7;
   c.save(); c.translate(x, y); c.rotate(a);
-  c.fillStyle = 'rgba(0,0,0,0.3)'; c.beginPath(); c.ellipse(2.5, 3, 5.4, 4.2, 0, 0, 6.28); c.fill();
+  c.fillStyle = 'rgba(0,0,0,0.2)'; c.beginPath(); c.ellipse(1.8, 2.2, 4.6, 3.6, 0, 0, 6.28); c.fill();
   c.strokeStyle = col; c.lineWidth = 1.8; c.lineCap = 'round';
   c.beginPath(); c.moveTo(-1, -1.8); c.lineTo(-1 + st, -2.7); c.moveTo(-1, 1.8); c.lineTo(-1 - st, 2.7); c.stroke();
   c.restore();
@@ -116,7 +116,7 @@ function sniperPart(color) {
     c.strokeStyle = '#1b1d20'; c.lineWidth = 1.5; c.beginPath(); c.moveTo(1, 1.4); c.lineTo(20, 1.4); c.stroke();
     c.fillStyle = '#2a2d31'; rr(c, 5, -0.5, 6.5, 1.8, 0.6); c.fill();
     c.strokeStyle = '#1b1d20'; c.lineWidth = 0.8; c.beginPath(); c.moveTo(15.5, 1.4); c.lineTo(16.5, 4); c.moveTo(15.5, 1.4); c.lineTo(16.5, -1.2); c.stroke();
-  }, { bevel: 0.32, grime: 0.35, rim: false }));
+  }, { bevel: 0.32, grime: 0.35, rim: false }), 7);
 }
 
 export const IDRAW = {
