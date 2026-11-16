@@ -447,7 +447,7 @@ export class Game {
     this.poiTurn(owner, ev);
     if (this.round > 1) {
       let amt = 0;
-      for (const b of this.buildings) if (!b.dead && b.owner === owner && b.turnsLeft <= 0) amt += b.type === 'bauhof' ? 150 : b.type === 'raffinerie' ? 50 : 0;
+      for (const b of this.buildings) if (!b.dead && b.owner === owner && b.turnsLeft <= 0) amt += b.type === 'bauhof' ? 150 : 0;
       amt = Math.round(amt * this.players[owner].incomeMult);
       if (amt) { this.players[owner].credits += amt; ev.push({ type: 'income', amount: amt, owner }); }
     }
@@ -460,7 +460,7 @@ export class Game {
           this.say(`${b.def.name} fertig`, 'good', owner);
           if (b.type === 'konvent') { const c = this.drawCard(owner); if (c) ev.push({ type: 'card', owner, card: c }); }
           ev.push({ type: 'built', b: b.id });
-          if (b.def.freeUnit) { const u = this.spawnNear(owner, b.def.freeUnit, b.c, b.r); if (u) ev.push({ type: 'spawn', u: u.id, from: b.id }); }
+          if (b.def.freeUnit) for (const t of [].concat(b.def.freeUnit)) { const u = this.spawnNear(owner, t, b.c, b.r); if (u) ev.push({ type: 'spawn', u: u.id, from: b.id }); }
         }
       }
       if (b.sabotaged > 0) { b.sabotaged--; if (b.sabotaged > 0 || b.producing) { if (b.producing) this.say(`${b.def.name}: Produktion durch Sabotage verzögert`, 'warn', owner); continue; } }
@@ -717,7 +717,7 @@ export class Game {
   }
   drop(carrier, c, r) {
     const t = this.get(carrier.carrying); if (!t) return null;
-    t.carried = false; t.c = c; t.r = r; carrier.carrying = 0; carrier.acted = true; carrier.moved = true;
+    t.carried = false; t.c = c; t.r = r; t.waitCarry = 0; carrier.carrying = 0; carrier.acted = true; carrier.moved = true;
     return { type: 'drop', u: carrier.id, t: t.id };
   }
 

@@ -32,10 +32,18 @@ export async function autoHarvest(g, u, act) {
     if (g.spiceAt(u.c, u.r) > 0 && u.cargo < cap) return;
     if (nearRef && u.cargo > 0) return;
   }
+  const goHome = u.cargo >= cap - 1 || (here >= 3 && u.cargo > cap * 0.5);
+  // Träger vorhanden: Ernter fahren nicht selbst zwischen Feld und Raffinerie, sie warten auf die Abholung
+  // (nach zwei Runden ohne Abholung fahren sie doch selbst, damit nichts hängen bleibt)
+  const hasCarrier = g.units.some((x) => !x.dead && x.owner === u.owner && x.def.carrier && x.auto && !x.carrying);
+  let spD = 99;
+  if (u.cargo === 0 && g.spiceAt(u.c, u.r) <= 0) for (let r = 0; r < g.H; r++) for (let c = 0; c < g.W; c++) if (g.spiceAt(c, r) > 0) spD = Math.min(spD, distance(c, r, u.c, u.r));
+  const needsLift = (goHome && !nearRef) || (u.cargo === 0 && nearRef && spD > 2);
+  if (hasCarrier && needsLift && here < 3 && (u.waitCarry || 0) < 2) { u.waitCarry = (u.waitCarry || 0) + 1; return; }
+  if (!needsLift) u.waitCarry = 0;
   const reach = g.reachable(u);
   const field = g.distanceField(u, (c, r) => danger(c, r) * 1.5);
   let target = null, bd = Infinity;
-  const goHome = u.cargo >= cap - 1 || (here >= 3 && u.cargo > cap * 0.5);
   if (goHome && refs.length) {
     for (const b of refs) for (const [c, r] of neighbors(b.c, b.r, g.W, g.H)) {
       const occ = g.unitAt(c, r, false);
@@ -76,10 +84,11 @@ export async function autoCarry(g, car, act) {
     const danger = g.isSand(h.c, h.r) ? Math.max(0, 6 - wormD(h.c, h.r)) : 0;
     let need = 0, goal = null;
     if (danger >= 2) { need = 10 + danger; goal = h.cargo > h.def.capacity * 0.4 ? 'ref' : 'spice'; }
-    else if (h.cargo >= h.def.capacity - 1 && refD(h) > 3) { need = 6 + refD(h); goal = 'ref'; }
+    // Volle Ernter fliegen immer per Träger zurück zur Raffinerie
+    else if (h.cargo >= h.def.capacity - 1 && refD(h) > 1) { need = 8 + refD(h); goal = 'ref'; }
     else if (h.cargo < h.def.capacity && g.spiceAt(h.c, h.r) <= 0 && h.cargo < h.def.capacity * 0.3) {
       let sp = 99; for (let r = 0; r < g.H; r++) for (let c = 0; c < g.W; c++) if (g.spiceAt(c, r) > 0) sp = Math.min(sp, distance(c, r, h.c, h.r));
-      if (sp > 4) { need = 3 + sp * 0.5; goal = 'spice'; }
+      if (sp > 2) { need = 4 + sp * 0.5; goal = 'spice'; }
     }
     if (!need) continue;
     const reach = g.reachable(car);
