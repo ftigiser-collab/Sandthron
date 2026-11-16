@@ -264,8 +264,61 @@ const DYN = {
 
 export function hasArt(type) { return !!STAT[type]; }
 
+// Baustelle: das fertige Gebäude wächst von unten, oben nur als Bauplan
+export function drawConstruction(ctx, b, color, t, prog) {
+  const p = part(`b-${b.type}-${color}`, 92, 92, (L) => STAT[b.type](L, color));
+  const top = 36 - 72 * clampN(0.15 + prog * 0.85);
+  // Bauplan-Geist
+  ctx.save(); ctx.globalAlpha *= 0.2; drawPart(ctx, p); ctx.restore();
+  ctx.save(); ctx.strokeStyle = 'rgba(120,210,255,0.35)'; ctx.lineWidth = 0.5; ctx.setLineDash([2, 2]);
+  ctx.strokeRect(-30, -30, 60, 60); ctx.beginPath(); ctx.moveTo(-30, 0); ctx.lineTo(30, 0); ctx.moveTo(0, -30); ctx.lineTo(0, 30); ctx.stroke(); ctx.restore();
+  // Fertiger Teil
+  ctx.save(); ctx.beginPath(); ctx.rect(-50, top, 100, 100); ctx.clip();
+  drawPartShadow(ctx, p, 5, 6, 0.28); drawPart(ctx, p); ctx.restore();
+  // Gerüst an der Baukante
+  ctx.save();
+  ctx.strokeStyle = 'rgba(200,170,110,0.85)'; ctx.lineWidth = 0.8;
+  const y0 = top - 9, y1 = top + 7;
+  ctx.beginPath();
+  for (let x = -28; x <= 28; x += 7) { ctx.moveTo(x, y0); ctx.lineTo(x, y1); }
+  ctx.moveTo(-28, y0); ctx.lineTo(28, y0); ctx.moveTo(-28, top); ctx.lineTo(28, top);
+  for (let x = -28; x < 28; x += 7) { ctx.moveTo(x, y0); ctx.lineTo(x + 7, top); }
+  ctx.stroke();
+  // Schweißfunken
+  ctx.globalCompositeOperation = 'lighter';
+  for (let k = 0; k < 3; k++) {
+    const ph = (t * 1.7 + k * 0.37) % 1, wx = Math.sin(t * 0.9 + k * 2.1) * 24;
+    if (ph < 0.35) {
+      const a = 1 - ph / 0.35;
+      ctx.fillStyle = `rgba(255,240,190,${a})`; ctx.beginPath(); ctx.arc(wx, top, 2.2 * a + 0.6, 0, 6.28); ctx.fill();
+      for (let j = 0; j < 4; j++) { const sx = wx + Math.sin(k * 7 + j * 3 + t * 30) * 6 * (1 - a), sy = top + (1 - a) * (3 + j * 2); ctx.fillStyle = `rgba(255,190,90,${a})`; ctx.fillRect(sx, sy, 0.9, 0.9); }
+    }
+  }
+  ctx.restore();
+  // Kran mit pendelndem Haken
+  ctx.save(); ctx.translate(30, 26);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(1, 1, 6, 6);
+  ctx.fillStyle = '#d9a33a'; ctx.fillRect(-3, -3, 6, 6); ctx.strokeStyle = '#3a2a14'; ctx.lineWidth = 0.6; ctx.strokeRect(-3, -3, 6, 6);
+  const ja = -2.4 + Math.sin(t * 0.35 + b.c) * 0.5;
+  ctx.rotate(ja);
+  ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(5, 7, 44, 3);
+  ctx.fillStyle = '#e8b440'; ctx.fillRect(0, -1.6, 44, 3.2);
+  ctx.strokeStyle = '#6a4a16'; ctx.lineWidth = 0.5; ctx.beginPath(); for (let x = 0; x < 44; x += 4) { ctx.moveTo(x, -1.6); ctx.lineTo(x + 4, 1.6); } ctx.stroke();
+  ctx.fillStyle = '#5a5048'; ctx.fillRect(-8, -2.4, 7, 4.8);
+  const hx = 30 + Math.sin(t * 1.4 + b.r) * 6;
+  ctx.fillStyle = '#2a2622'; ctx.fillRect(hx - 1.5, -2.2, 3, 4.4);
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(hx + 1, 2, 4, 4);
+  ctx.fillStyle = '#8c8070'; ctx.fillRect(hx - 2, -1, 4, 3);
+  ctx.restore();
+  // Fortschritt
+  ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(-20, 33, 40, 4);
+  ctx.fillStyle = color; ctx.fillRect(-19.5, 33.5, 39 * prog, 3);
+}
+function clampN(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+
 export function drawBuildingArt(ctx, b, color, t, o) {
   const p = part(`b-${b.type}-${color}`, 92, 92, (L) => STAT[b.type](L, color));
+  drawPartShadow(ctx, p, 5, 6, 0.28);
   drawPart(ctx, p);
   const d = DYN[b.type]; if (d) d(ctx, b, color, t, o);
 }

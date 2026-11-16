@@ -1,7 +1,9 @@
 // Prozedurale Grafik: Einheiten, Gebäude, Würmer (Draufsicht, Licht von oben links)
 import { shade, rgba } from './util.js';
 import { VDRAW } from './vart.js';
-import { hasArt, drawBuildingArt } from './bart.js';
+import { IDRAW } from './iart.js';
+import { part, drawPart, drawPartShadow } from './art.js';
+import { hasArt, drawBuildingArt, drawConstruction } from './bart.js';
 
 const M = { dark: '#3a3128', mid: '#6d604c', light: '#a4927a', hi: '#d3c4a6', sand: '#8a7354', glass: '#8fd0f0' };
 
@@ -388,7 +390,7 @@ const DRAW = {
 };
 
 let BANK = 0;
-Object.assign(DRAW, VDRAW);
+Object.assign(DRAW, VDRAW, IDRAW);
 function wings(ctx, x, y, len, wid, a, flap, alpha = 1) {
   for (const s of [-1, 1]) {
     ctx.save(); ctx.translate(x, y); ctx.rotate(s * a);
@@ -522,6 +524,13 @@ export function drawBuilding(ctx, b, x, y, color, t, o = {}) {
   if (b.turnsLeft <= 0 && hasArt(b.type)) {
     ctx.scale((0.8 + 0.2 * rise) * 1.12, (0.8 + 0.2 * rise) * 1.12);
     drawBuildingArt(ctx, b, color, t, o);
+    ctx.restore(); return;
+  }
+  if (b.turnsLeft > 0 && hasArt(b.type)) {
+    foundation(ctx, 33, color);
+    const prog = 1 - b.turnsLeft / Math.max(1, b.def.turns);
+    ctx.scale(1.12, 1.12);
+    drawConstruction(ctx, b, color, t, prog);
     ctx.restore(); return;
   }
   foundation(ctx, 33, color);
@@ -674,78 +683,150 @@ const BDRAW = {
 
 // ---------- Wurm ----------
 export function drawWormSign(ctx, x, y, t, a = 1, scale = 1) {
+  // Sandbuckel über dem Wurm: Licht oben links, Schatten unten rechts, Wellen im Sand
   ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale);
+  const breathe = 1 + Math.sin(t * 1.4) * 0.06;
+  const sh = ctx.createRadialGradient(4, 3, 2, 4, 3, 22 * breathe);
+  sh.addColorStop(0, `rgba(80,48,22,${0.4 * a})`); sh.addColorStop(1, 'rgba(80,48,22,0)');
+  ctx.fillStyle = sh; ctx.beginPath(); ctx.ellipse(4, 3, 24 * breathe, 16 * breathe, 0.4, 0, 6.28); ctx.fill();
+  const hi = ctx.createRadialGradient(-5, -4, 1, -3, -2, 16 * breathe);
+  hi.addColorStop(0, `rgba(255,230,185,${0.5 * a})`); hi.addColorStop(1, 'rgba(255,230,185,0)');
+  ctx.fillStyle = hi; ctx.beginPath(); ctx.ellipse(-3, -2, 17 * breathe, 11 * breathe, 0.4, 0, 6.28); ctx.fill();
   for (let k = 0; k < 4; k++) {
-    const ph = (t * 0.8 + k / 4) % 1;
-    ctx.strokeStyle = `rgba(120,80,40,${(1 - ph) * 0.5 * a})`; ctx.lineWidth = 3 * (1 - ph) + 1;
-    ctx.beginPath(); ctx.ellipse(0, 0, 6 + ph * 30, 4 + ph * 22, 0.4, 0, 6.28); ctx.stroke();
+    const ph = (t * 0.45 + k / 4) % 1, rx = 10 + ph * 34, ry = 7 + ph * 24, al = (1 - ph) * a;
+    ctx.lineWidth = 1.6 * (1 - ph) + 0.6;
+    ctx.strokeStyle = `rgba(255,232,190,${0.32 * al})`; ctx.beginPath(); ctx.ellipse(-0.8, -0.8, rx, ry, 0.4, 2.6, 5.8); ctx.stroke();
+    ctx.strokeStyle = `rgba(90,55,25,${0.38 * al})`; ctx.beginPath(); ctx.ellipse(0.8, 0.8, rx, ry, 0.4, -0.6, 2.6); ctx.stroke();
   }
-  ctx.fillStyle = `rgba(110,75,40,${0.4 * a})`; ctx.beginPath(); ctx.ellipse(0, 0, 12, 8, 0.4, 0, 6.28); ctx.fill();
+  // rieselnde Körner auf dem Buckel
+  ctx.fillStyle = `rgba(240,205,150,${0.6 * a})`;
+  for (let k = 0; k < 8; k++) { const ph = (t * 0.7 + k * 0.125) % 1, an = k * 0.785; ctx.fillRect(Math.cos(an) * (3 + ph * 12), Math.sin(an) * (2 + ph * 8), 1.2, 1.2); }
   ctx.restore();
 }
 
-export function drawWormMaw(ctx, x, y, t, k, scale = 1) {
-  // k: 0..1 Auftauchen — Körper steigt als segmentierte Säule aus dem Sand
-  const R = 30 * scale * (0.55 + 0.45 * k), h = 66 * scale * k;
-  ctx.save(); ctx.translate(x, y);
-  // Loch und Schatten
-  ctx.fillStyle = `rgba(30,18,8,${0.55 * k})`; ctx.beginPath(); ctx.ellipse(0, 0, R * 1.35, R * 0.7, 0, 0, 6.28); ctx.fill();
-  ctx.fillStyle = `rgba(0,0,0,${0.3 * k})`; ctx.beginPath(); ctx.ellipse(R * 0.9, R * 0.35, R * 1.3, R * 0.55, 0, 0, 6.28); ctx.fill();
-  // Körper aus gestapelten, sich verjüngenden Ringen, leicht geneigt
-  const N = 9, lean = 0.55 * scale;
-  let topX = 0;
-  for (let i = 0; i <= N; i++) {
-    const f = i / N, yy = -h * f, ox = Math.sin(f * Math.PI / 2) * R * lean;
-    const rad = R * (1.22 - 0.3 * f) * (1 + Math.sin(i * 2.3 + t * 2) * 0.03);
-    const g = ctx.createLinearGradient(ox - rad, 0, ox + rad, 0);
-    g.addColorStop(0, '#24170e'); g.addColorStop(0.3, '#6f5236'); g.addColorStop(0.5, '#a07c56'); g.addColorStop(0.75, '#5a402a'); g.addColorStop(1, '#1e130b');
-    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(ox, yy, rad, rad * 0.5, 0, 0, 6.28); ctx.fill();
-    ctx.strokeStyle = 'rgba(20,12,6,0.55)'; ctx.lineWidth = 2.2 * scale; ctx.beginPath(); ctx.ellipse(ox, yy, rad, rad * 0.5, 0, 0.1, Math.PI - 0.1); ctx.stroke();
-    ctx.strokeStyle = 'rgba(235,205,160,0.22)'; ctx.lineWidth = 1 * scale; ctx.beginPath(); ctx.ellipse(ox, yy - 2 * scale, rad * 0.9, rad * 0.42, 0, 0.5, Math.PI - 0.5); ctx.stroke();
-    // grobe Hautplatten
-    ctx.fillStyle = 'rgba(30,18,10,0.35)';
-    for (let j = 0; j < 5; j++) { const a = 0.3 + j * 0.6; ctx.fillRect(ox + Math.cos(a) * rad * 0.85 - 1.5, yy + Math.sin(a) * rad * 0.42, 3 * scale, 1.6 * scale); }
-    topX = ox;
+let wormSkin = null;
+function wormSkinPattern(ctx) {
+  if (wormSkin) return wormSkin;
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#808080'; c.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 900; i++) {
+    const x = Math.random() * 128, y = Math.random() * 128, r = 0.6 + Math.random() * 2.6, v = Math.random();
+    c.fillStyle = v < 0.5 ? `rgba(40,25,15,${0.25 + Math.random() * 0.3})` : `rgba(230,200,160,${0.12 + Math.random() * 0.2})`;
+    c.beginPath(); c.ellipse(x, y, r * 1.6, r, Math.random() * 0.4, 0, 6.28); c.fill();
   }
-  // Sand rieselt die Flanken herab
-  ctx.fillStyle = 'rgba(214,170,110,0.8)';
-  for (let i = 0; i < 18; i++) { const a = (i / 18) * Math.PI, fy = ((t * 70 + i * 17) % Math.max(4, h)); const f = 1 - fy / Math.max(4, h); ctx.fillRect(Math.sin(f * Math.PI / 2) * R * lean + Math.cos(a) * R * (1.22 - 0.3 * f) - 1, -h + fy, 2, 3.5); }
-  ctx.translate(topX, 0);
-  // Schlund oben: drei weit geöffnete Lappen
-  ctx.translate(0, -h);
-  const R0 = R; const Rm = R * 0.95;
+  for (let i = 0; i < 0; i++) { c.strokeStyle = 'rgba(30,18,10,0.35)'; c.lineWidth = 0.7; c.beginPath(); const x = Math.random() * 128, y = Math.random() * 128; c.moveTo(x, y); c.bezierCurveTo(x + 6, y + 3, x + 10, y - 2, x + 18, y + 1); c.stroke(); }
+  wormSkin = ctx.createPattern(cv, 'repeat');
+  return wormSkin;
+}
+
+export function drawWormMaw(ctx, x, y, t, k, scale = 1) {
+  // k: 0..1 Auftauchen — durchgehender, gerippter Leib mit aufklaffendem Schlund
+  const R = 30 * scale * (0.6 + 0.4 * k), h = 74 * scale * k;
+  const lean = 0.6 * R + Math.sin(t * 0.9) * 3 * scale;
+  ctx.save(); ctx.translate(x, y);
+  // Schatten und Sandkragen
+  ctx.fillStyle = `rgba(0,0,0,${0.32 * k})`; ctx.beginPath(); ctx.ellipse(R * 1.4 + h * 0.35, R * 0.5 + h * 0.15, R * 1.5 + h * 0.2, R * 0.6, 0.25, 0, 6.28); ctx.fill();
+  const col = ctx.createRadialGradient(0, 0, R * 0.7, 0, 0, R * 1.9);
+  col.addColorStop(0, `rgba(60,36,18,${0.85 * k})`); col.addColorStop(0.45, `rgba(176,128,78,${0.9 * k})`); col.addColorStop(0.7, `rgba(226,186,128,${0.75 * k})`); col.addColorStop(1, 'rgba(214,170,110,0)');
+  ctx.fillStyle = col; ctx.beginPath(); ctx.ellipse(0, 0, R * 1.9, R * 1.05, 0, 0, 6.28); ctx.fill();
+  // Mittellinie des Leibs
+  const C = (f) => ({ x: lean * f * f, y: -h * f });
+  const rad = (f) => R * (1.18 - 0.22 * f) * (1 + Math.sin(f * 14 - t * 3) * 0.025);
+  const N = 36, left = [], right = [];
+  for (let i = 0; i <= N; i++) { const f = i / N, c = C(f), r = rad(f); left.push([c.x - r, c.y]); right.push([c.x + r, c.y]); }
+  // Leib in gebogenen Bändern; Ringwülste stecken in der Helligkeit, keine Linien
+  const ribsN = 3 + 1.5 * scale;
+  const tone = (rgb, m) => `rgb(${Math.round(rgb[0] * m)},${Math.round(rgb[1] * m)},${Math.round(rgb[2] * m)})`;
+  const STOPS = [[0, [36, 22, 12]], [0.16, [100, 72, 48]], [0.36, [176, 138, 96]], [0.52, [138, 102, 70]], [0.82, [58, 38, 22]], [1, [21, 12, 6]]];
+  for (let i = 0; i < N; i++) {
+    const f0 = i / N, f1 = (i + 1) / N, c0 = C(f0), c1 = C(f1), r0 = rad(f0), r1 = rad(f1), cm = (c0.x + c1.x) / 2, rm = (r0 + r1) / 2;
+    const fm = (f0 + f1) / 2, rib = Math.pow(0.5 + 0.5 * Math.cos(fm * ribsN * 6.283 + 0.6), 4), lip = Math.pow(0.5 + 0.5 * Math.cos(fm * ribsN * 6.283 + 0.6 - 0.9), 6);
+    const m = 1 - rib * 0.42 + lip * 0.22;
+    const g = ctx.createLinearGradient(cm - rm, 0, cm + rm, 0);
+    for (const [o, c] of STOPS) g.addColorStop(o, tone(c, m));
+    ctx.fillStyle = g; ctx.beginPath();
+    ctx.ellipse(c0.x, c0.y + 1, r0, r0 * 0.46, 0, 0, Math.PI);
+    ctx.lineTo(c1.x - r1, c1.y);
+    ctx.ellipse(c1.x, c1.y, r1, r1 * 0.46, 0, Math.PI, 0, true);
+    ctx.closePath(); ctx.fill();
+  }
+  // Hautstruktur im Umriss
+  const body = new Path2D();
+  body.moveTo(left[0][0], left[0][1]); for (const p of left) body.lineTo(p[0], p[1]);
+  for (let i = right.length - 1; i >= 0; i--) body.lineTo(right[i][0], right[i][1]);
+  body.closePath();
+  ctx.save(); ctx.clip(body);
+  ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = 0.8; ctx.fillStyle = wormSkinPattern(ctx);
+  ctx.translate(0, -t * 6); ctx.fillRect(-R * 3, -h - R * 2 + t * 6, R * 6 + lean, h + R * 4); ctx.restore();
+  // Randlicht rechts (Himmelsreflex)
+  ctx.strokeStyle = 'rgba(255,220,170,0.18)'; ctx.lineWidth = 1.4 * scale; ctx.beginPath(); right.forEach((p, i) => i ? ctx.lineTo(p[0] - 2, p[1]) : ctx.moveTo(p[0] - 2, p[1])); ctx.stroke();
+  // Sand rieselt in Strähnen herab
+  for (let i = 0; i < 14; i++) {
+    const side = i % 2 ? 1 : -1, ph = ((t * 0.9 + i * 0.137) % 1), f = 1 - ph, c = C(f), r = rad(f);
+    const sx = c.x + side * r * (0.4 + (i % 5) * 0.12);
+    const sg = ctx.createLinearGradient(0, c.y, 0, c.y + 10 * scale); sg.addColorStop(0, `rgba(226,186,128,${0.7 * (1 - ph)})`); sg.addColorStop(1, 'rgba(226,186,128,0)');
+    ctx.fillStyle = sg; ctx.beginPath(); ctx.moveTo(sx - 1.1 * scale, c.y); ctx.lineTo(sx + 1.1 * scale, c.y); ctx.lineTo(sx + 0.3 * scale, c.y + 10 * scale); ctx.lineTo(sx - 0.3 * scale, c.y + 10 * scale); ctx.fill();
+  }
+  // Sandlippe vorne über dem Leibansatz
+  { const r0 = rad(0), sl = ctx.createLinearGradient(0, -r0 * 0.1, 0, r0 * 0.7);
+    sl.addColorStop(0, `rgba(236,198,140,${0.95 * k})`); sl.addColorStop(1, `rgba(170,124,76,${0.9 * k})`);
+    ctx.fillStyle = sl; ctx.beginPath(); ctx.ellipse(0, r0 * 0.12, r0 * 1.22, r0 * 0.52, 0, 0.05, Math.PI - 0.05); ctx.ellipse(0, -r0 * 0.02, r0 * 1.05, r0 * 0.4, 0, Math.PI - 0.1, 0.1, true); ctx.closePath(); ctx.fill();
+    for (let q = 0; q < 16; q++) { const a = 0.2 + q * 0.17 + Math.sin(q * 5.3) * 0.08, rr = r0 * (1.0 + Math.sin(q * 2.7) * 0.12); ctx.fillStyle = q % 3 ? `rgba(250,225,180,${0.35 * k})` : `rgba(120,80,45,${0.35 * k})`; ctx.beginPath(); ctx.ellipse(Math.cos(a) * rr, Math.sin(a) * rr * 0.46 + r0 * 0.1, (1.5 + (q % 4)) * scale, (0.8 + (q % 3) * 0.4) * scale, 0, 0, 6.28); ctx.fill(); } }
+  // ---------- Schlund ----------
+  const top = C(1); ctx.translate(top.x, top.y);
+  const Rm = rad(1);
+  // Drei Lippenlappen, nach außen geklappt, Innenseite fleischig
   for (let i = 0; i < 3; i++) {
-    const a = i / 3 * 6.28 - 1.57 + Math.sin(t * 1.5 + i) * 0.05;
-    ctx.save(); ctx.scale(1, 0.62); ctx.rotate(a); ctx.translate(Rm * 0.7, 0); ctx.rotate(0.3 * k);
-    const pg = ctx.createLinearGradient(0, 0, Rm * 1.3, 0); pg.addColorStop(0, '#4a3020'); pg.addColorStop(0.6, '#9a7450'); pg.addColorStop(1, '#d2aa78');
-    ctx.fillStyle = pg; ctx.beginPath(); ctx.moveTo(0, -Rm * 0.75); ctx.quadraticCurveTo(Rm * 1.5 * k, -Rm * 0.2, Rm * 1.2 * k, 0); ctx.quadraticCurveTo(Rm * 1.5 * k, Rm * 0.2, 0, Rm * 0.75); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = 'rgba(40,24,12,0.5)'; ctx.lineWidth = 1.2; for (let j = -1; j <= 1; j++) { ctx.beginPath(); ctx.moveTo(2, j * Rm * 0.3); ctx.quadraticCurveTo(Rm * 0.7 * k, j * Rm * 0.2, Rm * 1.1 * k, 0); ctx.stroke(); }
-    ctx.fillStyle = '#efe2c4'; for (let j = -3; j <= 3; j++) { ctx.beginPath(); ctx.moveTo(1, j * Rm * 0.2 - 2.4); ctx.lineTo(11 * k * scale, j * Rm * 0.18); ctx.lineTo(1, j * Rm * 0.2 + 2.4); ctx.fill(); }
+    const a = i / 3 * 6.28 - 1.57 + 0.4 + Math.sin(t * 1.3 + i * 2) * 0.06;
+    ctx.save(); ctx.scale(1, 0.55); ctx.rotate(a); ctx.translate(Rm * 0.62, 0);
+    const L = Rm * (0.6 + 0.85 * k), Wd = Rm * 0.85;
+    const outer = ctx.createLinearGradient(0, 0, L, 0); outer.addColorStop(0, '#3a2414'); outer.addColorStop(1, '#a8845c');
+    ctx.fillStyle = outer; ctx.beginPath(); ctx.moveTo(0, -Wd); ctx.bezierCurveTo(L * 0.8, -Wd * 0.9, L * 1.15, -Wd * 0.25, L, 0); ctx.bezierCurveTo(L * 1.15, Wd * 0.25, L * 0.8, Wd * 0.9, 0, Wd); ctx.closePath(); ctx.fill();
+    const inner = ctx.createLinearGradient(0, 0, L, 0); inner.addColorStop(0, '#2a0c08'); inner.addColorStop(0.5, '#8a3a26'); inner.addColorStop(1, '#c8765a');
+    ctx.fillStyle = inner; ctx.beginPath(); ctx.moveTo(0, -Wd * 0.72); ctx.bezierCurveTo(L * 0.7, -Wd * 0.65, L * 0.95, -Wd * 0.15, L * 0.86, 0); ctx.bezierCurveTo(L * 0.95, Wd * 0.15, L * 0.7, Wd * 0.65, 0, Wd * 0.72); ctx.closePath(); ctx.fill();
+    // Falten
+    ctx.strokeStyle = 'rgba(40,10,6,0.45)'; ctx.lineWidth = 0.9 * scale;
+    for (let j = -2; j <= 2; j++) { ctx.beginPath(); ctx.moveTo(2, j * Wd * 0.25); ctx.quadraticCurveTo(L * 0.5, j * Wd * 0.2, L * 0.82, j * Wd * 0.04); ctx.stroke(); }
+    // Zahnreihe am Lappen
+    for (let j = -4; j <= 4; j++) {
+      const ty = j * Wd * 0.16, tx = L * (0.25 + (1 - Math.abs(j) / 4) * 0.45);
+      ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.moveTo(tx, ty - 1.6 * scale); ctx.lineTo(tx - 6 * scale * k, ty + 0.8); ctx.lineTo(tx, ty + 1.6 * scale); ctx.fill();
+      ctx.fillStyle = '#e4d4b2'; ctx.beginPath(); ctx.moveTo(tx, ty - 1.4 * scale); ctx.lineTo(tx - 6 * scale * k, ty); ctx.lineTo(tx, ty + 1.4 * scale); ctx.fill();
+    }
     ctx.restore();
   }
-  const rim = ctx.createRadialGradient(0, 0, R * 0.5, 0, 0, R);
-  rim.addColorStop(0, '#2a140a'); rim.addColorStop(0.8, '#6a4630'); rim.addColorStop(1, '#a07a55');
-  ctx.fillStyle = rim; ctx.beginPath(); ctx.ellipse(0, 0, R, R * 0.6, 0, 0, 6.28); ctx.fill();
-  const thr = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 0.8);
-  thr.addColorStop(0, '#000'); thr.addColorStop(0.5, '#1a0904'); thr.addColorStop(1, '#4a2414');
-  ctx.fillStyle = thr; ctx.beginPath(); ctx.ellipse(0, 0, R * 0.82, R * 0.5, 0, 0, 6.28); ctx.fill();
-  for (let ring = 0; ring < 3; ring++) {
-    const rad = R * (0.78 - ring * 0.2), n = 22 - ring * 5;
+  // Schlundrand
+  const rim = ctx.createRadialGradient(-Rm * 0.2, -Rm * 0.15, Rm * 0.3, 0, 0, Rm * 1.05);
+  rim.addColorStop(0, '#3a1a0c'); rim.addColorStop(0.75, '#7a5236'); rim.addColorStop(1, '#b89068');
+  ctx.fillStyle = rim; ctx.beginPath(); ctx.ellipse(0, 0, Rm, Rm * 0.56, 0, 0, 6.28); ctx.fill();
+  // Tiefe: Zahnringe, die nach innen kleiner und dunkler werden
+  for (let ring = 0; ring < 5; ring++) {
+    const rr = Rm * (0.86 - ring * 0.15), n = 26 - ring * 4, dk = 1 - ring * 0.17;
+    const thr = ctx.createRadialGradient(0, 0, 0, 0, 0, rr);
+    thr.addColorStop(0, '#050201'); thr.addColorStop(0.7, `rgb(${Math.round(60 * dk)},${Math.round(22 * dk)},${Math.round(12 * dk)})`); thr.addColorStop(1, `rgb(${Math.round(110 * dk)},${Math.round(50 * dk)},${Math.round(30 * dk)})`);
+    ctx.fillStyle = thr; ctx.beginPath(); ctx.ellipse(0, rr * 0.05, rr, rr * 0.56, 0, 0, 6.28); ctx.fill();
+    const spin = t * (ring % 2 ? 0.55 : -0.4);
     for (let i = 0; i < n; i++) {
-      const a = i / n * 6.28 + t * (ring % 2 ? 0.7 : -0.5);
-      const cx = Math.cos(a), cy = Math.sin(a) * 0.6;
-      ctx.fillStyle = ring === 0 ? '#f1e5c8' : ring === 1 ? '#cdbb96' : '#9a8668';
+      const a = i / n * 6.28 + spin, len = (7 - ring) * scale * k;
+      const b0 = Math.round(240 * dk), b1 = Math.round(226 * dk), b2 = Math.round(196 * dk);
+      ctx.fillStyle = `rgb(${b0},${b1},${b2})`;
       ctx.beginPath();
-      ctx.moveTo(Math.cos(a - 0.1) * rad, Math.sin(a - 0.1) * rad * 0.6);
-      ctx.lineTo(cx * (rad - 7 * k * scale), cy * (rad - 7 * k * scale));
-      ctx.lineTo(Math.cos(a + 0.1) * rad, Math.sin(a + 0.1) * rad * 0.6);
+      ctx.moveTo(Math.cos(a - 0.09) * rr, Math.sin(a - 0.09) * rr * 0.56);
+      ctx.lineTo(Math.cos(a) * (rr - len), Math.sin(a) * (rr - len) * 0.56);
+      ctx.lineTo(Math.cos(a + 0.09) * rr, Math.sin(a + 0.09) * rr * 0.56);
       ctx.fill();
     }
   }
-  // schwaches Glühen tief im Schlund
+  // Glimmen tief im Schlund und Gewürzstaub, der herausweht
   ctx.globalCompositeOperation = 'lighter';
-  const gl = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 0.35); gl.addColorStop(0, `rgba(255,120,40,${0.35 * k})`); gl.addColorStop(1, 'rgba(255,120,40,0)');
-  ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(0, 0, R * 0.35, 0, 6.28); ctx.fill();
+  const gl = ctx.createRadialGradient(0, 0, 0, 0, 0, Rm * 0.45); gl.addColorStop(0, `rgba(255,130,50,${0.5 * k})`); gl.addColorStop(1, 'rgba(255,110,40,0)');
+  ctx.fillStyle = gl; ctx.beginPath(); ctx.ellipse(0, 0, Rm * 0.45, Rm * 0.28, 0, 0, 6.28); ctx.fill();
+  for (let i = 0; i < 10; i++) {
+    const ph = (t * 0.5 + i * 0.1) % 1, a = i * 2.4;
+    ctx.fillStyle = `rgba(255,160,80,${0.5 * (1 - ph) * k})`;
+    ctx.beginPath(); ctx.arc(Math.cos(a) * Rm * 0.3 * ph * 2, -ph * 30 * scale + Math.sin(a) * Rm * 0.15, 1.3 * scale, 0, 6.28); ctx.fill();
+  }
   ctx.restore();
 }
 
@@ -773,41 +854,108 @@ export function icon(kind, type, color) {
 }
 
 // ---------- Drop-Kapsel, Klopfer, Karten ----------
+function podBody(color) {
+  return part('pod-' + color, 34, 40, (L) => {
+    L((c) => {
+      // Hitzeschild unten, Kapselkörper, Schubdüsen
+      const g = c.createLinearGradient(-12, 0, 12, 0); g.addColorStop(0, '#d9dde3'); g.addColorStop(0.45, '#8c939c'); g.addColorStop(1, '#3a3f46');
+      c.fillStyle = g; c.beginPath(); c.moveTo(0, -18); c.bezierCurveTo(9, -14, 12, 0, 11, 10); c.lineTo(-11, 10); c.bezierCurveTo(-12, 0, -9, -14, 0, -18); c.closePath(); c.fill();
+      c.fillStyle = '#2c241d'; c.beginPath(); c.ellipse(0, 10, 12, 4.5, 0, 0, 6.28); c.fill();
+      const sc = c.createLinearGradient(0, 2, 0, 12); sc.addColorStop(0, 'rgba(60,35,20,0)'); sc.addColorStop(1, 'rgba(60,35,20,0.85)');
+      c.fillStyle = sc; c.beginPath(); c.moveTo(-11, 2); c.lineTo(11, 2); c.lineTo(11, 10); c.lineTo(-11, 10); c.fill();
+      c.fillStyle = color; c.fillRect(-10, -2, 20, 3.2);
+      c.strokeStyle = 'rgba(20,15,10,0.6)'; c.lineWidth = 0.5;
+      for (const yy of [-10, -5, 5]) { c.beginPath(); c.moveTo(-10, yy); c.quadraticCurveTo(0, yy + 1.5, 10, yy); c.stroke(); }
+      c.beginPath(); c.moveTo(0, -18); c.lineTo(0, 10); c.stroke();
+      c.fillStyle = 'rgba(255,220,140,0.9)'; c.beginPath(); c.arc(0, -11, 1.8, 0, 6.28); c.fill();
+      for (const sx of [-7, 7]) { c.fillStyle = '#4a4f57'; c.fillRect(sx - 1.5, -15, 3, 4); }
+    }, { bevel: 0.4, grime: 0.45 });
+  });
+}
+function podPetal(color) {
+  return part('podpetal-' + color, 16, 22, (L) => L((c) => {
+    const g = c.createLinearGradient(-6, 0, 6, 0); g.addColorStop(0, '#c8cdd4'); g.addColorStop(1, '#4a4f57');
+    c.fillStyle = g; c.beginPath(); c.moveTo(-6.5, 8); c.quadraticCurveTo(-6, -6, 0, -10); c.quadraticCurveTo(6, -6, 6.5, 8); c.closePath(); c.fill();
+    c.fillStyle = 'rgba(70,40,22,0.8)'; c.fillRect(-6.5, 5, 13, 3);
+    c.fillStyle = color; c.fillRect(-5, -1, 10, 2);
+  }, { bevel: 0.4, grime: 0.4 }));
+}
+
 export function drawPod(ctx, x, y, h, open, color, t) {
   ctx.save(); ctx.translate(x, y);
-  ctx.fillStyle = `rgba(0,0,0,${0.35 * (1 - Math.min(1, h / 300))})`; ctx.beginPath(); ctx.ellipse(0, 4, 14, 7, 0, 0, 6.28); ctx.fill();
+  const near = 1 - Math.min(1, h / 320);
+  ctx.fillStyle = `rgba(0,0,0,${0.4 * near})`; ctx.beginPath(); ctx.ellipse(h * 0.25, 4 + h * 0.08, 10 + 8 * near, 5 + 4 * near, 0, 0, 6.28); ctx.fill();
+  if (h > 5 && open <= 0) {
+    // Zielmarke am Boden
+    ctx.strokeStyle = `rgba(255,170,90,${0.5 * near + 0.2})`; ctx.lineWidth = 1.2; ctx.setLineDash([3, 3]); ctx.lineDashOffset = -t * 20;
+    ctx.beginPath(); ctx.arc(0, 0, 10 + (1 - near) * 14, 0, 6.28); ctx.stroke(); ctx.setLineDash([]);
+  }
   ctx.translate(0, -h);
   if (open > 0) {
+    const pt = podPetal(color);
+    ctx.globalCompositeOperation = 'lighter';
+    const ig = ctx.createRadialGradient(0, 0, 0, 0, 0, 14); ig.addColorStop(0, `rgba(255,200,120,${0.7 * (1 - open * 0.6)})`); ig.addColorStop(1, 'rgba(255,120,40,0)');
+    ctx.fillStyle = ig; ctx.beginPath(); ctx.arc(0, 0, 14, 0, 6.28); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#1e1a17'; ctx.beginPath(); ctx.arc(0, 0, 7, 0, 6.28); ctx.fill();
     for (let k = 0; k < 4; k++) {
-      ctx.save(); ctx.rotate(k * Math.PI / 2 + 0.785); ctx.translate(0, -4 - open * 8); ctx.rotate(open * 0.6);
-      ctx.fillStyle = grad(ctx, -6, -10, 6, 0, '#9aa0a8', '#4a4f57'); ctx.beginPath(); ctx.moveTo(-6, 0); ctx.lineTo(0, -12); ctx.lineTo(6, 0); ctx.closePath(); ctx.fill();
-      ctx.restore();
+      ctx.save(); ctx.rotate(k * Math.PI / 2 + 0.785); ctx.translate(0, -6 - open * 9); ctx.rotate(open * 0.5);
+      drawPartShadow(ctx, pt, 2, 2, 0.35); drawPart(ctx, pt); ctx.restore();
     }
-    ctx.fillStyle = '#2a2a2e'; ctx.beginPath(); ctx.arc(0, 0, 7, 0, 6.28); ctx.fill();
   } else {
-    const g = ctx.createLinearGradient(-8, 0, 8, 0); g.addColorStop(0, '#c9ced6'); g.addColorStop(1, '#4d535c');
-    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(0, -16); ctx.lineTo(9, 6); ctx.lineTo(-9, 6); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = color; ctx.fillRect(-6, 0, 12, 3);
+    const body = podBody(color);
+    if (h > 5) {
+      // Plasmahülle und Schweif
+      ctx.globalCompositeOperation = 'lighter';
+      const tr = ctx.createLinearGradient(0, -10, 0, -70); tr.addColorStop(0, 'rgba(255,180,90,0.55)'); tr.addColorStop(1, 'rgba(255,120,40,0)');
+      ctx.fillStyle = tr; ctx.beginPath(); ctx.moveTo(-9, -8); ctx.lineTo(9, -8); ctx.lineTo(3, -70); ctx.lineTo(-3, -70); ctx.closePath(); ctx.fill();
+      const fl = 0.85 + Math.sin(t * 40) * 0.15;
+      const fg = ctx.createRadialGradient(0, 12, 1, 0, 12, 20 * fl); fg.addColorStop(0, 'rgba(255,240,200,1)'); fg.addColorStop(0.4, 'rgba(255,170,80,0.7)'); fg.addColorStop(1, 'rgba(255,90,30,0)');
+      ctx.fillStyle = fg; ctx.beginPath(); ctx.arc(0, 12, 20 * fl, 0, 6.28); ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    drawPart(ctx, body);
     if (h > 5) {
       ctx.globalCompositeOperation = 'lighter';
-      const fg = ctx.createRadialGradient(0, 8, 1, 0, 8, 16); fg.addColorStop(0, 'rgba(255,220,150,0.95)'); fg.addColorStop(1, 'rgba(255,120,40,0)');
-      ctx.fillStyle = fg; ctx.beginPath(); ctx.arc(0, 8, 16, 0, 6.28); ctx.fill();
+      const hs = ctx.createLinearGradient(0, 4, 0, 14); hs.addColorStop(0, 'rgba(255,120,40,0)'); hs.addColorStop(1, 'rgba(255,200,120,0.8)');
+      ctx.fillStyle = hs; ctx.beginPath(); ctx.ellipse(0, 10, 12, 5, 0, 0, 6.28); ctx.fill();
     }
   }
   ctx.restore();
 }
 
+function thumperBase() {
+  return part('thumper-base', 26, 26, (L) => L((c) => {
+    for (let k = 0; k < 3; k++) {
+      const a = k * 2.094 + 0.5; c.strokeStyle = '#4a4f57'; c.lineWidth = 2.2; c.lineCap = 'round';
+      c.beginPath(); c.moveTo(0, 0); c.lineTo(Math.cos(a) * 10, Math.sin(a) * 9); c.stroke();
+      c.fillStyle = '#2e3236'; c.beginPath(); c.arc(Math.cos(a) * 10, Math.sin(a) * 9, 1.8, 0, 6.28); c.fill();
+    }
+    const g = c.createRadialGradient(-1.5, -1.5, 0.5, 0, 0, 5); g.addColorStop(0, '#9aa0a8'); g.addColorStop(1, '#3a3f46');
+    c.fillStyle = g; c.beginPath(); c.arc(0, 0, 4.6, 0, 6.28); c.fill();
+    c.fillStyle = '#d9a33a'; c.fillRect(-1, -4.5, 2, 9);
+  }, { bevel: 0.4, grime: 0.4 }));
+}
 export function drawThumper(ctx, x, y, t) {
   ctx.save(); ctx.translate(x, y);
+  const beat = (t * 1.6) % 1, hit = beat < 0.12 ? 1 - beat / 0.12 : 0;
+  // Schlagwellen im Sand
   for (let k = 0; k < 3; k++) {
-    const ph = (t * 1.2 + k / 3) % 1;
-    ctx.strokeStyle = `rgba(255,200,120,${(1 - ph) * 0.6})`; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.ellipse(0, 2, 6 + ph * 34, 4 + ph * 22, 0, 0, 6.28); ctx.stroke();
+    const ph = (t * 1.6 + k / 3) % 1, rx = 8 + ph * 40, ry = 5 + ph * 26, al = (1 - ph);
+    ctx.lineWidth = 2 * al + 0.5;
+    ctx.strokeStyle = `rgba(255,232,190,${0.35 * al})`; ctx.beginPath(); ctx.ellipse(-0.8, 1.2, rx, ry, 0, 2.6, 5.8); ctx.stroke();
+    ctx.strokeStyle = `rgba(90,55,25,${0.4 * al})`; ctx.beginPath(); ctx.ellipse(0.8, 2.8, rx, ry, 0, -0.6, 2.6); ctx.stroke();
   }
-  const bob = Math.abs(Math.sin(t * 6)) * 3;
-  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(3, 4, 5, 3, 0, 0, 6.28); ctx.fill();
-  ctx.fillStyle = '#5b616a'; ctx.fillRect(-1.5, -16, 3, 18);
-  ctx.fillStyle = '#c7a24a'; ctx.fillRect(-4, -18 + bob, 8, 5);
+  const base = thumperBase();
+  drawPartShadow(ctx, base, 2, 3, 0.35); drawPart(ctx, base);
+  // Kolben: hebt sich und schlägt
+  const lift = (1 - Math.pow(1 - Math.min(1, beat / 0.85), 2)) * 9;
+  ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fillRect(1.5 + lift * 0.3, -1 - lift * 0.2, 4, 4);
+  ctx.fillStyle = '#6b7178'; ctx.fillRect(-1, -4 - lift, 2, 4 + lift);
+  ctx.fillStyle = '#c7a24a'; ctx.fillRect(-3.4, -8 - lift, 6.8, 4.5);
+  ctx.fillStyle = 'rgba(255,240,200,0.45)'; ctx.fillRect(-3.4, -8 - lift, 6.8, 1.2);
+  if (hit > 0) { ctx.fillStyle = `rgba(230,195,140,${0.6 * hit})`; ctx.beginPath(); ctx.ellipse(0, 1, 10 * (1.4 - hit), 6 * (1.4 - hit), 0, 0, 6.28); ctx.fill(); }
+  ctx.fillStyle = `rgba(255,80,40,${0.5 + 0.5 * Math.sin(t * 8)})`; ctx.beginPath(); ctx.arc(0, -8 - lift - 1, 0.9, 0, 6.28); ctx.fill();
   ctx.restore();
 }
 

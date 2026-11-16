@@ -1,8 +1,8 @@
 // Renderer: Kamera, Gelände, Glut, Markierungen, Einheiten, Sturm, Nebel
-import { center, hexPath, R, HW, ring, distance } from './hex.js';
+import { center, hexPath, R, HW, ring, distance, pixelToHex } from './hex.js';
 import { drawUnit, drawBuilding, drawWormSign, drawWormMaw, drawPod, drawThumper, drawSandWhirl, drawWormRidge } from './sprites.js';
 import { WORM_SIZES } from './data.js';
-import { clamp, rgba } from './util.js';
+import { clamp, rgba, Noise, smoothstep } from './util.js';
 
 const FILTER_OK = (() => { try { const c = document.createElement('canvas').getContext('2d'); c.filter = 'blur(2px)'; return c.filter === 'blur(2px)'; } catch { return false; } })();
 
@@ -54,21 +54,55 @@ export class Renderer {
   // ---------- Hilfen ----------
   makeSpiceSprites() {
     const out = [];
-    for (let v = 0; v < 4; v++) {
-      const s = Math.ceil(R * 2.6), cv = document.createElement('canvas'); cv.width = cv.height = s;
+    const N = new Noise(977);
+    for (let v = 0; v < 6; v++) {
+      const s = Math.ceil(R * 3.3), cv = document.createElement('canvas'); cv.width = cv.height = s;
       const c = cv.getContext('2d'), m = s / 2;
-      const g = c.createRadialGradient(m, m, 2, m, m, R * 1.2);
-      g.addColorStop(0, 'rgba(214,92,40,0.75)'); g.addColorStop(0.55, 'rgba(204,104,50,0.45)'); g.addColorStop(1, 'rgba(200,110,60,0)');
-      c.fillStyle = g; c.fillRect(0, 0, s, s);
-      for (let k = 0; k < 140; k++) {
-        const a = Math.random() * 6.28, d = Math.pow(Math.random(), 0.7) * R * 1.05;
-        const x = m + Math.cos(a) * d, y = m + Math.sin(a) * d * 0.9, rr = 0.6 + Math.random() * 1.8;
-        c.fillStyle = Math.random() < 0.3 ? 'rgba(255,170,90,0.9)' : 'rgba(150,50,25,0.75)';
+      const img = c.createImageData(s, s), ox = v * 31.7, oy = v * 17.3;
+      for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+        const dx = (x - m) / (R * 1.45), dy = (y - m) / (R * 1.35), d = Math.hypot(dx, dy);
+        const n = N.fbm(x / 13 + ox, y / 13 + oy, 4), n2 = N.fbm(x / 4 + oy, y / 4 + ox, 2);
+        const cover = smoothstep(0.26, 0.6, n + (0.72 - d) * 0.85);
+        if (cover <= 0) continue;
+        const vein = 1 - Math.abs(2 * N.fbm(x / 7 + 9 + ox, y / 7 - oy, 3) - 1);
+        const i = (y * s + x) * 4;
+        const hot = Math.pow(vein, 6);
+        img.data[i] = clamp(160 + n2 * 50 + hot * 80, 0, 255);
+        img.data[i + 1] = clamp(66 + n2 * 30 + hot * 90, 0, 255);
+        img.data[i + 2] = clamp(34 + n2 * 16 + hot * 40, 0, 255);
+        img.data[i + 3] = clamp(cover * (95 + n2 * 110), 0, 215);
+      }
+      c.putImageData(img, 0, 0);
+      // Pulverkörnung und Kristalle
+      for (let k = 0; k < 260; k++) {
+        const a = Math.random() * 6.28, d = Math.pow(Math.random(), 0.8) * R * 1.05;
+        const x = m + Math.cos(a) * d, y = m + Math.sin(a) * d * 0.9, rr = 0.4 + Math.random() * 1.1;
+        const q = Math.random();
+        c.fillStyle = q < 0.12 ? 'rgba(255,214,140,0.95)' : q < 0.55 ? 'rgba(120,34,14,0.55)' : 'rgba(230,120,60,0.6)';
         c.beginPath(); c.arc(x, y, rr, 0, 6.28); c.fill();
+      }
+      for (let k = 0; k < 7; k++) {
+        const a = Math.random() * 6.28, d = Math.random() * R * 0.8, x = m + Math.cos(a) * d, y = m + Math.sin(a) * d;
+        c.fillStyle = 'rgba(80,22,8,0.45)'; c.beginPath(); c.ellipse(x + 1, y + 1, 2.4, 1.6, a, 0, 6.28); c.fill();
+        c.fillStyle = 'rgba(255,180,100,0.9)'; c.beginPath(); c.moveTo(x, y - 2.4); c.lineTo(x + 1.3, y); c.lineTo(x, y + 1.2); c.lineTo(x - 1.3, y); c.closePath(); c.fill();
       }
       out.push(cv);
     }
     return out;
+  }
+
+  renderSpiceLayer() {
+    const g = this.g, base = g.map.base;
+    const cv = this.spiceLayer || (this.spiceLayer = document.createElement('canvas'));
+    if (cv.width !== base.width) { cv.width = base.width; cv.height = base.height; }
+    const ctx = cv.getContext('2d'); ctx.clearRect(0, 0, cv.width, cv.height);
+    for (let r = 0; r < g.H; r++) for (let c = 0; c < g.W; c++) {
+      const sp = g.spiceAt(c, r); if (sp <= 0 || !g.explored[g.i(c, r)]) continue;
+      const p = center(c, r), spr = this.spiceSprites[(c * 7 + r * 13) % 6];
+      ctx.globalAlpha = clamp(0.25 + sp / 700, 0.3, 1);
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate((c * 2.3 + r * 1.7) % 6.28); ctx.drawImage(spr, -spr.width / 2, -spr.height / 2); ctx.restore();
+    }
+    ctx.globalAlpha = 1;
   }
 
   // Zeichnet über einen kleinen Puffer und färbt ein — schneller als ctx.filter
@@ -111,16 +145,18 @@ export class Renderer {
     this.drawSandDrift(ctx);
     this.drawHeat(ctx);
 
-    // Glut
+    // Glut: vorgerenderte Schicht, nur bei Änderung neu
+    let sig = 0, cnt = 0;
+    for (let i = 0; i < g.W * g.H; i++) if (g.explored[i]) { cnt++; sig += g.map.spice[i] * (i % 7 + 1); }
+    sig = sig * 1000 + cnt;
+    if (!this.spiceLayer || this.spiceSig !== sig) { this.spiceSig = sig; this.renderSpiceLayer(); }
+    ctx.drawImage(this.spiceLayer, 0, 0);
     for (let r = 0; r < g.H; r++) for (let c = 0; c < g.W; c++) {
+      if (Math.random() > 0.012) continue;
       const sp = g.spiceAt(c, r); if (sp <= 0 || !g.explored[g.i(c, r)]) continue;
       const p = center(c, r); if (p.x < view.x0 || p.x > view.x1 || p.y < view.y0 || p.y > view.y1) continue;
-      const spr = this.spiceSprites[(c * 7 + r * 13) % 4];
-      ctx.globalAlpha = clamp(0.25 + sp / 700, 0.3, 1);
-      ctx.drawImage(spr, p.x - spr.width / 2, p.y - spr.height / 2);
-      if (Math.random() < 0.012) this.fx.add({ kind: 'glow', x: p.x + (Math.random() - 0.5) * R, y: p.y + (Math.random() - 0.5) * R, vy: -6, life: 0.9, size: 2.5, grow: 1, col: '255,170,90', a: 0.9 });
+      this.fx.add({ kind: 'glow', x: p.x + (Math.random() - 0.5) * R, y: p.y + (Math.random() - 0.5) * R, vy: -6, life: 0.9, size: 2.5, grow: 1, col: '255,170,90', a: 0.9 });
     }
-    ctx.globalAlpha = 1;
 
     // Raster
     ctx.strokeStyle = 'rgba(40,25,15,0.16)'; ctx.lineWidth = 1;
@@ -217,9 +253,12 @@ export class Renderer {
     const col = g.players[u.owner].color;
     const done = u.owner === g.current && g.current === 0 && (u.acted || (u.moved && !g.canFire(u) && !(u.def.carrier && !u.acted)));
     if (this.hl.sel === u) {
-      ctx.save(); ctx.translate(center(u.c, u.r).x, center(u.c, u.r).y); ctx.rotate(this.t * 0.6);
-      ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]);
-      ctx.beginPath(); hexPath(ctx, 0, 0, R - 5); ctx.stroke(); ctx.restore();
+      const cp = center(u.c, u.r), ph = (this.t * 0.8) % 1;
+      ctx.save(); ctx.translate(cp.x, cp.y);
+      const gl = ctx.createRadialGradient(0, 0, 4, 0, 0, R - 4); gl.addColorStop(0, 'rgba(255,220,140,0.22)'); gl.addColorStop(1, 'rgba(255,220,140,0)');
+      ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(0, 0, R - 4, 0, 6.28); ctx.fill();
+      ctx.strokeStyle = `rgba(255,230,170,${0.6 * (1 - ph)})`; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(0, 0, 10 + ph * (R - 14), 0, 6.28); ctx.stroke();
+      ctx.restore();
     }
     ctx.save();
     const turretUnit = u.type === 'panzer' || u.type === 'werfer' || u.type === 'laserpanzer' || u.type === 'koloss' || u.type === 'flakwagen';
@@ -375,21 +414,71 @@ export class Renderer {
     }
   }
 
+  // Umriss einer Hexmenge als Liniensegmente
+  outline(list) {
+    const key = (c, r) => c + ',' + r, set = new Set(list.map(([c, r]) => key(c, r))), segs = [];
+    for (const [c, r] of list) {
+      const p = center(c, r);
+      for (let i = 0; i < 6; i++) {
+        const a = Math.PI / 3 * i, q = pixelToHex(p.x + Math.cos(a) * HW, p.y + Math.sin(a) * HW);
+        if (set.has(key(q.col, q.row))) continue;
+        const a0 = a - Math.PI / 6, a1 = a + Math.PI / 6, rr = R - 1;
+        segs.push([p.x + Math.cos(a0) * rr, p.y + Math.sin(a0) * rr, p.x + Math.cos(a1) * rr, p.y + Math.sin(a1) * rr]);
+      }
+    }
+    return segs;
+  }
+
+  region(ctx, list, cacheKey, fill, stroke, glow) {
+    if (!list.length) return;
+    const c = this._regions || (this._regions = new Map());
+    let e = c.get(cacheKey);
+    if (!e || e.src !== list) { e = { src: list, segs: this.outline(list) }; c.set(cacheKey, e); }
+    ctx.beginPath(); for (const [cc, r] of list) { const p = center(cc, r); hexPath(ctx, p.x, p.y, R - 0.5); }
+    ctx.fillStyle = fill; ctx.fill();
+    ctx.beginPath(); for (const [x0, y0, x1, y1] of e.segs) { ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); }
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = glow; ctx.lineWidth = 6; ctx.stroke();
+    ctx.strokeStyle = stroke; ctx.lineWidth = 1.8; ctx.stroke();
+  }
+
+  brackets(ctx, x, y, rad, col, w, spin = 0) {
+    ctx.save(); ctx.translate(x, y); ctx.rotate(spin); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = 'round';
+    for (let i = 0; i < 6; i++) {
+      const a = Math.PI / 180 * (60 * i - 30), cx = Math.cos(a) * rad, cy = Math.sin(a) * rad;
+      const an = Math.PI / 180 * (60 * (i + 1) - 30), ap = Math.PI / 180 * (60 * (i - 1) - 30), f = 0.28;
+      ctx.beginPath(); ctx.moveTo(cx + (Math.cos(ap) * rad - cx) * f, cy + (Math.sin(ap) * rad - cy) * f); ctx.lineTo(cx, cy); ctx.lineTo(cx + (Math.cos(an) * rad - cx) * f, cy + (Math.sin(an) * rad - cy) * f); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   drawHighlights(ctx) {
-    const { hl, g } = this, t = this.t;
+    const { hl } = this, t = this.t;
     const fillHex = (c, r, fill, stroke, w = 2, rad = R - 2) => {
       const p = center(c, r); ctx.beginPath(); hexPath(ctx, p.x, p.y, rad);
       if (fill) { ctx.fillStyle = fill; ctx.fill(); }
       if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = w; ctx.stroke(); }
     };
-
-    if (hl.move) for (const n of hl.move.values()) if (n.end) fillHex(n.c, n.r, 'rgba(70,160,255,0.22)', 'rgba(120,200,255,0.55)', 1.5);
-    for (const [c, r] of hl.build) fillHex(c, r, `rgba(90,230,120,${0.18 + 0.08 * Math.sin(t * 4)})`, 'rgba(120,255,150,0.7)', 1.5);
-    for (const [c, r] of hl.drop) fillHex(c, r, 'rgba(90,230,230,0.2)', 'rgba(120,255,255,0.7)', 1.5);
-    for (const [c, r] of hl.target) fillHex(c, r, `rgba(190,120,255,${0.16 + 0.08 * Math.sin(t * 4)})`, 'rgba(210,160,255,0.8)', 1.5);
-    for (const e of hl.attack) fillHex(e.c, e.r, `rgba(255,60,40,${0.2 + 0.1 * Math.sin(t * 6)})`, 'rgba(255,90,70,0.95)', 2.5);
-    if (hl.hover) fillHex(hl.hover.c, hl.hover.r, 'rgba(255,255,255,0.08)', 'rgba(255,255,255,0.5)', 1.5);
-    if (hl.sel) { const p = this.posOf(hl.sel); ctx.beginPath(); hexPath(ctx, center(hl.sel.c, hl.sel.r).x, center(hl.sel.c, hl.sel.r).y, R - 2); ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 2.5; ctx.stroke(); }
+    if (hl.move) {
+      if (this._mvSrc !== hl.move) { this._mvSrc = hl.move; this._mvList = [...hl.move.values()].filter((n) => n.end).map((n) => [n.c, n.r]); }
+      this.region(ctx, this._mvList, 'move', 'rgba(70,150,255,0.13)', 'rgba(150,215,255,0.95)', 'rgba(80,170,255,0.25)');
+    }
+    const pulse = 0.5 + 0.5 * Math.sin(t * 4);
+    if (hl.build.length) this.region(ctx, hl.build, 'build', `rgba(90,230,120,${0.1 + 0.07 * pulse})`, 'rgba(150,255,170,0.95)', 'rgba(90,230,120,0.25)');
+    if (hl.drop.length) this.region(ctx, hl.drop, 'drop', 'rgba(90,230,230,0.13)', 'rgba(150,255,255,0.95)', 'rgba(90,230,230,0.25)');
+    if (hl.target.length) this.region(ctx, hl.target, 'target', `rgba(190,120,255,${0.1 + 0.07 * pulse})`, 'rgba(220,175,255,0.95)', 'rgba(190,120,255,0.25)');
+    for (const e of hl.attack) {
+      const p = center(e.c, e.r);
+      fillHex(e.c, e.r, `rgba(255,60,40,${0.1 + 0.1 * pulse})`, null);
+      this.brackets(ctx, p.x, p.y, R - 3 - pulse * 3, 'rgba(255,190,170,0.35)', 5);
+      this.brackets(ctx, p.x, p.y, R - 3 - pulse * 3, 'rgba(255,80,60,1)', 2);
+    }
+    if (hl.hover) { const p = center(hl.hover.c, hl.hover.r); fillHex(hl.hover.c, hl.hover.r, 'rgba(255,255,255,0.07)', null); this.brackets(ctx, p.x, p.y, R - 3, 'rgba(255,255,255,0.7)', 1.5); }
+    if (hl.sel) {
+      const p = center(hl.sel.c, hl.sel.r);
+      this.brackets(ctx, p.x, p.y, R - 1, 'rgba(255,220,140,0.3)', 6);
+      this.brackets(ctx, p.x, p.y, R - 1, 'rgba(255,236,190,1)', 2.2);
+    }
   }
 
   drawStormForecast(ctx) {
