@@ -145,6 +145,18 @@ export async function aiTurn(g, act, owner = 1) {
   const order = [...army].sort((a, b) => (g.weapon(b).range[1] - g.weapon(a).range[1]));
   for (const u of order) {
     if (u.dead || u.acted || u.moved || g.state !== 'play') continue;
+    if (g.canThump(u)) {
+      // Klopfer neben feindliche Einheiten im Sand, wenn ein Wurm in Reichweite ist
+      let best = null, bs = 0;
+      for (const [c, r] of g.thumpHexes(u)) {
+        if (!g.worms.some((w) => distance(w.c, w.r, c, r) <= 12)) continue;
+        const foes = g.units.filter((e) => !e.dead && !e.carried && e.owner !== owner && e.def.mt !== 'air' && g.isSand(e.c, e.r) && distance(e.c, e.r, c, r) <= 1);
+        const mine = g.units.filter((e) => !e.dead && e.owner === owner && e.def.mt !== 'air' && distance(e.c, e.r, c, r) <= 1).length;
+        const s = foes.reduce((a, e) => a + value(g, e), 0) - mine * 600;
+        if (s > bs) { bs = s; best = [c, r]; }
+      }
+      if (best && bs >= 400) { await act.thump(u, best[0], best[1]); continue; }
+    }
     if (g.canVoice(u)) {
       const ts = g.voiceTargets(u).sort((a, b) => value(g, b) - value(g, a));
       if (ts.length && value(g, ts[0]) >= 300) { await act.voice(u, ts[0]); continue; }
@@ -272,7 +284,7 @@ export function aiProduce(g, owner) {
     if (b.def.produces === 'veh') {
       if (refs && harvesters < Math.min(4, refs + 1) && g.prereqOk(owner, UNITS.ernter)) opts = [['ernter', 10]];
       else opts = [['panzer', 5], ['trike', 2], ['werfer', 2]];
-    } else if (b.def.produces === 'inf') opts = [['inf', 3], ['rak', 2]];
+    } else if (b.def.produces === 'inf') opts = [['inf', 3], ['rak', 2], ['sandgaenger', g.ownUnits(owner).filter((u) => u.type === 'sandgaenger').length < 2 ? 1 : 0]];
     else if (b.def.produces === 'air') {
       const foeAir = g.units.filter((u) => !u.dead && u.owner !== owner && u.def.mt === 'air').length;
       const carriers = g.ownUnits(owner).filter((u) => u.def.carrier).length;

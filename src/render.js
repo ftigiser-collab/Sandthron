@@ -1,6 +1,7 @@
 // Renderer: Kamera, Gelände, Glut, Markierungen, Einheiten, Sturm, Nebel
 import { center, hexPath, R, HW, ring, distance } from './hex.js';
-import { drawUnit, drawBuilding, drawWormSign, drawWormMaw, drawPod, drawThumper } from './sprites.js';
+import { drawUnit, drawBuilding, drawWormSign, drawWormMaw, drawPod, drawThumper, drawSandWhirl, drawWormRidge } from './sprites.js';
+import { WORM_SIZES } from './data.js';
 import { clamp, rgba } from './util.js';
 
 const FILTER_OK = (() => { try { const c = document.createElement('canvas').getContext('2d'); c.filter = 'blur(2px)'; return c.filter === 'blur(2px)'; } catch { return false; } })();
@@ -108,6 +109,7 @@ export class Renderer {
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(g.map.base, 0, 0);
     this.drawSandDrift(ctx);
+    this.drawHeat(ctx);
 
     // Glut
     for (let r = 0; r < g.H; r++) for (let c = 0; c < g.W; c++) {
@@ -161,9 +163,12 @@ export class Renderer {
       if (w.gone) continue;
       const p = w.vis || center(w.c, w.r);
       const seen = g.wormSeen(w) || w.forceShow;
-      if (w.surface > 0) drawWormMaw(ctx, p.x, p.y, this.t, w.surface);
+      const sc = WORM_SIZES[w.size || 1].scale;
+      if (w.whirl > 0) drawSandWhirl(ctx, p.x, p.y, this.t, w.whirl, sc);
+      if (w.surface > 0) { /* wird über dem Staub gezeichnet */ }
+      else if (seen && w.vis) drawWormRidge(ctx, p.x, p.y, w.dir || 0, this.t, sc);
       else if (seen) {
-        drawWormSign(ctx, p.x, p.y, this.t, 1);
+        drawWormSign(ctx, p.x, p.y, this.t, 1, sc);
         if (w.vis && Math.random() < 0.7) { this.fx.dust(p.x, p.y, 2, '200,150,95', 30, 9); this.fx.add({ kind: 'debris', x: p.x + (Math.random() - 0.5) * 30, y: p.y, vx: (Math.random() - 0.5) * 40, vy: (Math.random() - 0.5) * 20, vz: 60 + Math.random() * 80, life: 0.8, size: 2.5, col: '214,168,104', a: 1 }); }
       }
     }
@@ -175,6 +180,7 @@ export class Renderer {
     for (const u of ground) this.drawUnitFull(ctx, u);
     this.fx.draw(ctx, 'ground', view);
     this.fx.draw(ctx, 'air', view);
+    for (const w of g.worms) if (w.surface > 0) { const p = w.vis || center(w.c, w.r); drawWormMaw(ctx, p.x, p.y, this.t, w.surface, WORM_SIZES[w.size || 1].scale); }
     for (const u of air) this.drawUnitFull(ctx, u);
     for (const pd of this.pods) drawPod(ctx, pd.x, pd.y, pd.h, pd.open, pd.color, this.t);
     this.drawProjectiles(ctx);
@@ -210,7 +216,7 @@ export class Renderer {
     const idleTurret = turretUnit && !(u.aimUntil > this.t) ? Math.sin(this.t * 0.45 + u.id * 1.7) * 0.4 : (u.turretRel || 0);
     const air = u.def.mt === 'air';
     const z = air ? (u.z ?? 26) + (u.crashing ? 0 : Math.sin(this.t * 2.2 + u.id) * 1.8) : 0;
-    const o = { ring: !u.crashing, moving: !!u.anim, turret: idleTurret, recoil: u.recoil || 0, harvesting: u.harvestAnim > 0, z };
+    const o = { ring: !u.crashing && !u.sink, scale: u.sink ? 1.62 * (1 - u.sink * 0.85) : undefined, bank: u.bank || 0, moving: !!u.anim, turret: idleTurret, recoil: u.recoil || 0, harvesting: u.harvestAnim > 0, z };
     if (u.def.carrier && u.carrying) {
       const c = g.get(u.carrying);
       if (c) o.carry = () => drawUnit(ctx, c, 0, 0, col, this.t, { turret: 0 });
@@ -408,6 +414,21 @@ export class Renderer {
     this.sandPattern.setTransform(new DOMMatrix([1, 0.25, -0.15, 1, off, off * 0.3]));
     ctx.save(); ctx.clip(this.sandPath); ctx.fillStyle = this.sandPattern;
     const v = this.view; ctx.fillRect(v.x0, v.y0, v.x1 - v.x0, v.y1 - v.y0); ctx.restore();
+  }
+
+  // Hitzeflimmern über dem Sand am Tag
+  drawHeat(ctx) {
+    if (this.g.dayPhase() !== 'tag' || this.cam.z < 0.7 || !this.sandPath) return;
+    const v = this.view, base = this.g.map.base;
+    const x0 = Math.max(0, v.x0), x1 = Math.min(base.width, v.x1), w = x1 - x0;
+    if (w <= 0) return;
+    ctx.save(); ctx.clip(this.sandPath); ctx.globalAlpha = 0.33;
+    const step = 7;
+    for (let y = Math.max(0, Math.floor(v.y0 / step) * step); y < Math.min(base.height, v.y1); y += step) {
+      const dx = Math.sin(y * 0.05 + this.t * 2.8) * 1.6 + Math.sin(y * 0.013 - this.t * 1.3) * 0.8;
+      ctx.drawImage(base, x0, y, w, step, x0 + dx, y - 0.6, w, step);
+    }
+    ctx.restore();
   }
 
   // Wolkenschatten ziehen langsam über die Wüste

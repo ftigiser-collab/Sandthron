@@ -23,6 +23,7 @@ export class Controller {
       voice: (u, t) => this.doVoice(u, t),
       card: (owner, idx, c, r) => this.doCard(owner, idx, c, r),
       pickup: (car, t) => this.animPickup(car, t),
+      thump: (u, c, r) => this.doThump(u, c, r),
       drop: (car, c, r) => this.animDrop(car, c, r),
     };
     this.bindInput();
@@ -53,7 +54,13 @@ export class Controller {
       const f = k * (pts.length - 1), i = Math.min(pts.length - 2, Math.floor(f)), l = f - i;
       const a = pts[i], b = pts[i + 1];
       u.vis = { x: a.x + (b.x - a.x) * l, y: a.y + (b.y - a.y) * l };
-      u.facing = Math.atan2(b.y - a.y, b.x - a.x);
+      const nf = Math.atan2(b.y - a.y, b.x - a.x);
+      if (u.def.mt === 'air') {
+        const d = angDiff(u.facing ?? nf, nf);
+        u.bank = Math.max(-1, Math.min(1, (u.bank || 0) * 0.85 + d * 1.6));
+        if ((k < 0.12 || k > 0.88) && Math.random() < 0.6) { const ga = Math.random() * 6.28; this.fx.dust(u.vis.x + Math.cos(ga) * 18, u.vis.y + Math.sin(ga) * 12, 1, '210,175,120', 6, 5); }
+      }
+      u.facing = nf;
       if (u.def.mt !== 'air' && u.def.cat === 'veh' && sand(path[i + 1]) && Math.random() < 0.5) this.fx.dust(u.vis.x - Math.cos(u.facing) * 12, u.vis.y - Math.sin(u.facing) * 12, 1, '205,160,100', 6, 4);
       if (u.def.mt !== 'air' && u.def.cat === 'veh') { const lt = u._lt; if (!lt || Math.hypot(u.vis.x - lt.x, u.vis.y - lt.y) > 7) { this.fx.track(u.vis.x, u.vis.y, u.facing, u.type === 'trike' ? 8 : u.type === 'ernter' ? 15 : 11); u._lt = { ...u.vis }; } }
       if (u.def.mt === 'air' && sand(path[i + 1]) && Math.random() < 0.15) this.fx.dust(u.vis.x, u.vis.y, 1, '210,170,110', 14, 5);
@@ -61,6 +68,7 @@ export class Controller {
       const c = u.carrying && this.g.get(u.carrying); if (c) c.vis = u.vis;
     });
     u.vis = null; u.anim = false;
+    if (u.bank) this.tween(0.4, (k) => { u.bank *= 0.8; }).then(() => { u.bank = 0; });
     const c = u.carrying && this.g.get(u.carrying); if (c) c.vis = null;
   }
 
@@ -248,7 +256,22 @@ export class Controller {
       else if (ev.type === 'worm') await this.animWorm(ev);
       else if (ev.type === 'blow') {
         const p = center(ev.c, ev.r);
-        if (g.explored[g.i(ev.c, ev.r)]) { this.r.centerOn(p.x, p.y); await this.wait(0.3); this.fx.sandBurst(p.x, p.y, 40, 40); this.fx.flash(p.x, p.y, 60, '255,150,60', 0.5); this.r.float(p.x, p.y, 'Glutausbruch!', '#ffb060', true); await this.wait(0.8); }
+        if (g.explored[g.i(ev.c, ev.r)]) {
+          this.r.centerOn(p.x, p.y); await this.wait(0.3);
+          const fx = this.fx;
+          // Beben und aufwölbender Boden
+          await this.tween(0.7, (k) => { fx.shake = Math.max(fx.shake, 2 + k * 3); if (Math.random() < 0.7) fx.dust(p.x + (Math.random() - 0.5) * 60 * k, p.y + (Math.random() - 0.5) * 40 * k, 1, '190,120,60', 10, 6); });
+          // Eruption: Glutsäule
+          fx.flash(p.x, p.y, 90, '255,150,60', 0.6); fx.sandBurst(p.x, p.y, 50, 30); fx.shake = 10;
+          await this.tween(1.0, (k, dt) => {
+            for (let n = 0; n < 6; n++) fx.add({ kind: 'glow', x: p.x + (Math.random() - 0.5) * 14, y: p.y, vx: (Math.random() - 0.5) * 60, vy: -160 - Math.random() * 160, life: 1.1, size: 4 + Math.random() * 4, grow: 3, col: '255,140,50', a: 0.9 });
+            for (let n = 0; n < 3; n++) fx.add({ kind: 'puff', x: p.x + (Math.random() - 0.5) * 20, y: p.y - Math.random() * 30, vx: (Math.random() - 0.5) * 70, vy: -60 - Math.random() * 80, life: 2.4, size: 6, grow: 16, col: Math.random() < 0.5 ? '220,120,50' : '200,150,90', a: 0.45, air: true });
+          });
+          // Glutregen
+          for (let n = 0; n < 40; n++) fx.add({ kind: 'glow', x: p.x + (Math.random() - 0.5) * 120, y: p.y - 60 - Math.random() * 60, vy: 40 + Math.random() * 40, life: 1.4, size: 2.5, grow: 0, col: '255,170,80', a: 0.9 });
+          this.r.float(p.x, p.y - 30, 'Glutausbruch!', '#ffb060', true);
+          await this.wait(0.8);
+        }
       }
     }
     g.cleanup();
@@ -273,99 +296,75 @@ export class Controller {
     const g = this.g, w = g.byId.get(ev.id); if (!w) return;
     const pts = ev.path.map((h) => center(h.c, h.r));
     const seenAny = ev.path.some((h) => g.visible[g.i(h.c, h.r)] || g.radar[g.i(h.c, h.r)]);
-    const victims = (ev.eatMany || (ev.eat ? [ev.eat] : [])).map((id) => g.byId.get(id)).filter(Boolean);
-    const victim = victims[0] || (ev.thumper ? { owner: -1 } : null);
+    const victims = (ev.eatMany || []).map((id) => g.byId.get(id)).filter(Boolean);
+    const strike = ev.eatHexes || ev.thumper;
     const show = seenAny || victims.some((v) => v.owner === 0) || ev.thumper;
     if (!show) { for (const v of victims) v.gone = true; return; }
+    const sc = { 1: 1, 2: 1.4, 3: 1.9 }[w.size || 1];
+    const fx = this.fx;
     w.forceShow = true;
-    if (victim) this.r.centerOn(pts[pts.length - 1].x, pts[pts.length - 1].y);
+    const end = pts[pts.length - 1];
+    if (strike) { this.r.centerOn(end.x, end.y); await this.wait(0.25); }
+    // 1. Anmarsch unter dem Sand: Sandwelle, Staub, Beben
     if (pts.length > 1) {
-      await this.tween(0.22 * (pts.length - 1), (k) => {
+      await this.tween(0.24 * (pts.length - 1) / Math.min(1.3, sc), (k) => {
         const f = k * (pts.length - 1), i = Math.min(pts.length - 2, Math.floor(f)), l = f - i;
         w.vis = { x: pts[i].x + (pts[i + 1].x - pts[i].x) * l, y: pts[i].y + (pts[i + 1].y - pts[i].y) * l };
-        if (Math.random() < 0.6) this.fx.dust(w.vis.x, w.vis.y, 1, '190,140,90', 20, 8);
+        w.dir = Math.atan2(pts[i + 1].y - pts[i].y, pts[i + 1].x - pts[i].x);
+        if (Math.random() < 0.8) fx.dust(w.vis.x - Math.cos(w.dir) * 20 * sc, w.vis.y - Math.sin(w.dir) * 20 * sc, 2, '200,150,95', 26 * sc, 7 * sc);
+        if (Math.random() < 0.5) fx.add({ kind: 'debris', x: w.vis.x + (Math.random() - 0.5) * 30 * sc, y: w.vis.y + (Math.random() - 0.5) * 16 * sc, vx: (Math.random() - 0.5) * 50, vy: (Math.random() - 0.5) * 30, vz: 60 + Math.random() * 90 * sc, life: 0.9, size: 2 + Math.random() * 2, col: '214,168,104', a: 1 });
+        if (strike) fx.shake = Math.max(fx.shake, 1.5 * sc * k);
       });
     }
-    if (victim) {
-      const p = pts[pts.length - 1];
-      this.fx.shake = 8;
-      this.fx.sandBurst(p.x, p.y, 50, 36);
-      await this.tween(0.45, (k) => { w.surface = k; });
+    w.vis = { ...end };
+    if (strike) {
+      // 2. Sandtrichter: Boden sackt ein, Opfer werden hineingezogen
+      const hexPts = (ev.eatHexes || [[ev.path[ev.path.length - 1].c, ev.path[ev.path.length - 1].r]]).map(([c, r]) => center(c, r));
+      for (const v of victims) v.vis = { ...center(v.c, v.r) };
+      $('#app').classList.add('quake');
+      await this.tween(0.8, (k) => {
+        w.whirl = k;
+        fx.shake = Math.max(fx.shake, 3 * sc);
+        for (const v of victims) { const p0 = center(v.c, v.r); v.vis = { x: p0.x + (end.x - p0.x) * k * 0.5 + (Math.random() - 0.5) * 3, y: p0.y + (end.y - p0.y) * k * 0.5 + (Math.random() - 0.5) * 3 }; }
+        for (const hp of hexPts) if (Math.random() < 0.5) fx.dust(hp.x + (Math.random() - 0.5) * 50, hp.y + (Math.random() - 0.5) * 40, 1, '190,140,85', 10, 6);
+      });
+      // 3. Ausbruch: der Wurm schießt aus dem Sand
+      fx.shake = 14 * sc;
+      for (const hp of hexPts) fx.sandBurst(hp.x, hp.y, 22, 30, 3);
+      fx.sandBurst(end.x, end.y, 60 * sc, 46 * sc, 6);
+      fx.ring(end.x, end.y, 20 * sc, '240,210,160', 0.6);
+      await this.tween(0.5, (k) => {
+        w.surface = 1 - (1 - k) * (1 - k);
+        for (const v of victims) { const p0 = v.vis; v.vis = { x: p0.x + (end.x - p0.x) * 0.25, y: p0.y + (end.y - p0.y) * 0.25 }; v.sink = k; }
+      });
       for (const v of victims) v.gone = true;
-      this.fx.sandBurst(p.x, p.y, 30, 20);
-      this.r.float(p.x, p.y - 30, victims.length ? 'Verschlungen!' : 'Der Köder ist weg', '#ff7050', true);
-      await this.wait(0.5);
-      await this.tween(0.6, (k) => { w.surface = 1 - k; });
-      w.surface = 0;
+      this.r.float(end.x, end.y - 40 * sc, victims.length ? (victims.length > 1 ? `${victims.length} Einheiten verschlungen!` : 'Verschlungen!') : 'Der Köder ist weg', '#ff7050', true);
+      // 4. Mächtiges Verharren: Zähne mahlen, Sand rieselt vom Rand
+      await this.tween(0.9, (k) => {
+        fx.shake = Math.max(fx.shake, 2.5 * sc);
+        if (Math.random() < 0.9) { const a = Math.random() * 6.28, rr = 38 * sc; fx.add({ kind: 'debris', x: end.x + Math.cos(a) * rr, y: end.y + Math.sin(a) * rr * 0.8 - 20 * sc, vx: -Math.cos(a) * 20, vy: 10, vz: 30, life: 0.8, size: 2 + Math.random() * 2, col: '214,168,104', a: 1 }); }
+      });
+      // 5. Abtauchen
+      await this.tween(0.8, (k) => { w.surface = 1 - k; w.whirl = 1 - k; if (Math.random() < 0.5) fx.dust(end.x, end.y, 3, '200,150,95', 40 * sc, 10 * sc); });
+      $('#app').classList.remove('quake');
+      w.surface = 0; w.whirl = 0;
+      fx.decal(end.x, end.y, 30 * sc);
+      await this.wait(0.2);
     }
     w.vis = null; w.forceShow = false;
   }
 
-  async animOrbital(ev) {
-    const g = this.g, units = ev.units.map((id) => g.get(id)).filter(Boolean);
-    const seen = ev.owner === 0 || units.some((u) => g.visible[g.i(u.c, u.r)]);
-    if (!seen) return;
-    const col = g.players[ev.owner].color;
-    for (const u of units) u.hidden = true;
-    const tgt = center(ev.c, ev.r);
-    this.r.centerOn(tgt.x, tgt.y); await this.wait(0.3);
-    const pods = units.map((u, i) => { const p = center(u.c, u.r); return { x: p.x, y: p.y, h: 520 + i * 60, open: 0, color: col, ox: 260 + i * 30 }; });
-    this.r.pods.push(...pods);
-    await this.tween(1.0, (k) => {
-      for (const pd of pods) {
-        const kk = Math.min(1, k * (520 / (pd.h0 || (pd.h0 = pd.h))));
-        pd.cur = 1 - k; pd.hh = pd.h0 * (1 - k);
-        pd.h = pd.hh; pd.drawX = pd.x + pd.ox * (1 - k);
-        if (Math.random() < 0.9) { this.fx.fire(pd.x + pd.ox * (1 - k) * 0, pd.y - pd.h, 1, 5); this.fx.smoke(pd.x, pd.y - pd.h + 10, 1, 5, 0.6); }
-      }
-    });
-    for (const pd of pods) { pd.h = 0; this.fx.explosion(pd.x, pd.y, 0.7); this.fx.ring(pd.x, pd.y, 14, '255,220,170', 0.6); this.fx.dust(pd.x, pd.y, 16, '200,160,110', 40, 9); }
-    this.fx.shake = 7;
-    await this.tween(0.4, (k) => { for (const pd of pods) pd.open = k; });
-    for (const u of units) { u.hidden = false; this.hitFlash(u); }
-    await this.wait(0.5);
-    this.r.pods = this.r.pods.filter((p) => !pods.includes(p));
-    if (ev.owner === 0) { g.updateVision(); this.r.fogDirty = true; }
-  }
-
-  async doVoice(u, t) {
+  async doThump(u, c, r) {
     const g = this.g;
-    const ev = g.voice(u, t);
-    const a = this.r.posOf(u), b = this.r.posOf(t);
-    if (u.owner === 0 || g.seen(u) || g.seen(t)) {
+    g.thump(u, c, r);
+    if (u.owner === 0 || g.visible[g.i(c, r)]) {
+      const a = this.r.posOf(u), b = center(c, r);
       this.ensureVisible(b.x, b.y);
-      await this.tween(0.7, (k, dt) => {
-        if (Math.random() < dt * 14) this.fx.ring(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, 4, '210,150,255', 0.5);
-      });
-      this.fx.ring(b.x, b.y, 10, '210,150,255', 0.7); this.fx.flash(b.x, b.y, 30, '190,120,255', 0.3);
-      this.r.float(b.x, b.y - 10, 'Gelähmt!', '#d6a8ff', true);
-      await this.wait(0.4);
+      await this.tween(0.5, (k) => { if (Math.random() < 0.5) this.fx.dust(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, 1, '200,160,110', 8, 4); });
+      this.fx.dust(b.x, b.y, 10, '200,160,110', 20, 6); this.fx.ring(b.x, b.y, 8, '255,210,140', 0.6);
+      this.r.float(b.x, b.y - 10, 'Klopfer!', '#ffd080', true);
+      await this.wait(0.3);
     }
-  }
-
-  async doCard(owner, idx, c, r) {
-    const g = this.g;
-    const ev = g.playCard(owner, idx, c, r);
-    if (!ev) return false;
-    const p = center(c, r);
-    const card = CARDS[ev.card];
-    const visible = owner === 0 || (c !== undefined && g.visible[g.i(c, r)]);
-    await this.banner(card.name, owner === 0 ? 'Intrige der Schwesternschaft' : `${g.players[owner].name} spielt eine Intrige`, 0.9);
-    if (!visible && !['wetter', 'sabotage', 'stimme', 'verrat'].includes(ev.card)) { this.refresh(); return true; }
-    if (ev.target || ev.card === 'klopfer' || ev.card === 'wetter') { this.r.centerOn(p.x, p.y); await this.wait(0.3); }
-    const fx = this.fx;
-    if (ev.card === 'stimme') { fx.ring(p.x, p.y, 12, '210,150,255', 0.8); fx.flash(p.x, p.y, 40, '190,120,255', 0.4); this.r.float(p.x, p.y, 'Gelähmt!', '#d6a8ff', true); }
-    else if (ev.card === 'vorahnung') { this.r.fogDirty = true; $('#app').classList.add('vision'); setTimeout(() => $('#app').classList.remove('vision'), 900); }
-    else if (ev.card === 'wetter') { fx.ring(p.x, p.y, 20, '255,190,120', 0.8); this.r.float(p.x, p.y, 'Sturm umgelenkt', '#ffc080', true); }
-    else if (ev.card === 'klopfer') { fx.dust(p.x, p.y, 10, '200,160,110', 20, 6); this.r.float(p.x, p.y, 'Klopfer gesetzt', '#ffd080', true); }
-    else if (ev.card === 'verrat') { const u = g.get(ev.target); fx.spark(p.x, p.y, 20, '210,160,255', 90); if (u) this.hitFlash(u); this.r.float(p.x, p.y, 'Übergelaufen!', '#d6a8ff', true); }
-    else if (ev.card === 'schild') { fx.ring(p.x, p.y, 14, '140,210,255', 0.8); this.r.float(p.x, p.y, 'Schildwall', '#9fdcff', true); }
-    else if (ev.card === 'sabotage') { for (let k = 0; k < 6; k++) setTimeout(() => { fx.spark(p.x + (Math.random() - 0.5) * 30, p.y + (Math.random() - 0.5) * 30, 6, '255,200,120', 80); fx.smoke(p.x, p.y, 2, 6, 0.9); }, k * 90); this.r.float(p.x, p.y, 'Sabotiert!', '#ffb070', true); }
-    else if (ev.card === 'gilde' && owner === 0) { this.flash('Nächster Orbital-Drop kostenlos'); }
-    await this.wait(0.6);
-    g.updateVision(); this.r.fogDirty = true;
-    this.refresh();
-    return true;
   }
 
   pulse(sel) { const el = $(sel); if (!el) return; el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse'); }
@@ -496,13 +495,14 @@ export class Controller {
       }
       this.mode = 'moved'; this.select(this.sel); return;
     }
-    if (this.mode === 'card' || this.mode === 'orbital' || this.mode === 'voice') {
+    if (this.mode === 'card' || this.mode === 'orbital' || this.mode === 'voice' || this.mode === 'thump') {
       const hit = this.r.hl.target.some(([tc, tr]) => tc === c && tr === r);
       const m = this.mode; this.clearHL(); this.mode = 'idle';
       if (!hit) { this.deselect(); return; }
       this.busy = true;
       if (m === 'card') await this.doCard(0, this.cardIdx, c, r);
       else if (m === 'orbital') { if (g.orderDrop(0, this.dropId, c, r)) { const p = center(c, r); this.fx.ring(p.x, p.y, 10, '255,210,120', 0.6); } }
+      else if (m === 'thump') await this.doThump(this.sel, c, r);
       else if (m === 'voice') { const t = g.voiceTargets(this.sel).find((t) => t.c === c && t.r === r); if (t) await this.doVoice(this.sel, t); }
       this.busy = false; this.deselect(); this.refresh(); return;
     }
@@ -816,6 +816,7 @@ export class Controller {
         if (e.def.harvester) btns.push(`<button data-a="auto" class="${e.auto ? 'on' : ''}">Auto-Ernte: ${e.auto ? 'an' : 'aus'}</button>`);
         const tg = g.canFire(e) ? g.targetsFrom(e, e.c, e.r).length : 0;
         if (tg && e.moved) btns.push(`<span class="hint">${tg} Ziel${tg > 1 ? 'e' : ''} in Reichweite — rot markiert antippen</span>`);
+        if (e.def.thumper) btns.push(g.canThump(e) ? '<button data-a="thump" class="purple">Klopfer setzen</button>' : `<button disabled>Klopfer bereit in ${e.thumpCd || 0} ${e.thumpCd === 1 ? 'Runde' : 'Runden'}</button>`);
         if (e.def.voice) btns.push(g.canVoice(e) ? (g.voiceTargets(e).length ? '<button data-a="voice" class="purple">Stimme einsetzen</button>' : '<button disabled>Stimme: kein Ziel in 2 Feldern</button>') : `<button disabled>Stimme bereit in ${e.voiceCd || 0} ${e.voiceCd === 1 ? 'Runde' : 'Runden'}</button>`);
         if (e.stunned > 0 || e.wasStunned) btns.push('<button disabled>Gelähmt</button>');
         if (e.def.carrier) btns.push(`<button data-a="auto" class="${e.auto ? 'on' : ''}">Auto-Transport: ${e.auto ? 'an' : 'aus'}</button>`);
@@ -948,6 +949,7 @@ export class Controller {
     }
     if (a === 'prod') { this.infoSel = null; if (g.produce(e, t)) { this.flash(`${UNITS[t].name} in Auftrag gegeben`); this.refresh(); this.showPanel(e); } else this.flash('Produktion nicht möglich'); return; }
     if (a === 'cancelprod') { g.cancelProduce(e); this.refresh(); this.showPanel(e); return; }
+    if (a === 'thump') { this.mode = 'thump'; this.clearHL(); this.r.hl.sel = e; this.r.hl.target = g.thumpHexes(e); this.flash('Sandfeld für den Klopfer antippen (bis 2 Felder)'); return; }
     if (a === 'voice') { this.mode = 'voice'; this.clearHL(); this.r.hl.sel = e; this.r.hl.target = g.voiceTargets(e).map((t) => [t.c, t.r]); this.flash('Ziel für die Stimme antippen'); return; }
     if (a === 'orbital') {
       const cost = g.dropCost(0, t);

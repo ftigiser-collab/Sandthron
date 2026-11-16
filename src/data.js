@@ -18,6 +18,7 @@ export const TER_IDS = ['sand', 'dune', 'rock', 'mountain'];
 // Bewegungskosten je Fortbewegungsart (Infinity = unpassierbar)
 export const MOVE_COST = {
   foot:  { sand: 1, dune: 2, rock: 1, mountain: 2 },
+  sandfoot: { sand: 1, dune: 1, rock: 1, mountain: 2 },
   wheel: { sand: 1, dune: 3, rock: 1, mountain: Infinity },
   track: { sand: 1, dune: 2, rock: 1, mountain: Infinity },
   air:   { sand: 1, dune: 1, rock: 1, mountain: 1 },
@@ -58,6 +59,8 @@ export const WEAPONS = {
 export const UNITS = {
   inf:     { name: 'Infanterist', cat: 'inf', move: 3, mt: 'foot', sight: 2, armor: 'inf', weapon: 'rifle', cost: 100, prereq: ['kaserne'], vib: 1,
              desc: 'Günstig und geländegängig — klettert sogar ins Gebirge.' },
+  sandgaenger: { name: 'Sandgänger', cat: 'inf', move: 4, mt: 'sandfoot', sight: 3, armor: 'inf', weapon: 'rifle', cost: 400, prereq: ['kaserne', 'ausguck'], vib: 0, thumper: true,
+             desc: 'Wüstenkundige Späher. Gehen ohne Rhythmus und locken keine Würmer an, Dünen kosten sie nichts extra. Setzen alle 3 Runden einen Klopfer in bis zu 2 Feldern Entfernung.' },
   rak:     { name: 'Raketentrupp', cat: 'inf', move: 2, mt: 'foot', sight: 2, armor: 'inf', weapon: 'rocketInf', cost: 250, prereq: ['kaserne'], vib: 1,
              desc: 'Panzerabwehr zu Fuß. Trifft auch Thopter.' },
   trike:   { name: 'Sandläufer', cat: 'veh', move: 7, mt: 'wheel', sight: 3, armor: 'light', weapon: 'mg', cost: 350, prereq: ['fabrik'], vib: 2,
@@ -107,6 +110,12 @@ export const BUILDINGS = {
                 desc: 'Bodenabwehr, Reichweite 2. Feuert automatisch am Rundenende.' },
   flak:       { name: 'Flakstellung', cat: 'def', hp: 160, power: -20, cost: 600, turns: 1, sight: 3, prereq: ['ausguck'], weapon: 'flak',
                 desc: 'Luftabwehr, Reichweite 3. Feuert automatisch am Rundenende.' },
+};
+
+export const WORM_SIZES = {
+  1: { name: 'Sandwurm', steps: 5, sated: 1, weight: 60, scale: 1 },
+  2: { name: 'Großer Wurm', steps: 6, sated: 1, weight: 30, scale: 1.4 },
+  3: { name: 'Uralter Wurm', steps: 7, sated: 2, weight: 10, scale: 1.9 },
 };
 
 export const DIFFICULTY = {

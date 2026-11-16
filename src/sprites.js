@@ -57,6 +57,26 @@ const DRAW = {
       soldier(ctx, px * ca - py * sa, px * sa + py * ca, a, color, t, false, o.moving);
     }
   },
+  sandgaenger(ctx, u, color, t, o) {
+    const a = u.facing, ca = Math.cos(a), sa = Math.sin(a);
+    for (const [px, py] of [[5, -4], [-4, 5]]) {
+      ctx.save(); ctx.translate(px * ca - py * sa, px * sa + py * ca); ctx.rotate(a);
+      const st = o.moving ? Math.sin(t * 12 + px) * 3 : 0.6;
+      ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.beginPath(); ctx.ellipse(2.5, 3, 6, 4.5, 0, 0, 6.28); ctx.fill();
+      ctx.strokeStyle = '#4a3c2c'; ctx.lineWidth = 1.8; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(-1, -1.8); ctx.lineTo(-1 + st, -2.8); ctx.moveTo(-1, 1.8); ctx.lineTo(-1 - st, 2.8); ctx.stroke();
+      // Umhang im Wind
+      const fl = Math.sin(t * 5 + px) * 1.2;
+      ctx.fillStyle = grad(ctx, -6, -5, 4, 5, '#b39a72', '#6f5b40');
+      ctx.beginPath(); ctx.moveTo(3, -4); ctx.quadraticCurveTo(-4, -6 - fl, -9, -2); ctx.lineTo(-9, 2); ctx.quadraticCurveTo(-4, 6 + fl, 3, 4); ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = color; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(1.5, -3.2); ctx.lineTo(1.5, 3.2); ctx.stroke();
+      ctx.fillStyle = '#6d5a42'; ctx.beginPath(); ctx.arc(1.5, 0, 2.6, 0, 6.28); ctx.fill();
+      ctx.fillStyle = '#2c2620'; ctx.fillRect(3, -1.4, 1.2, 2.8);
+      ctx.fillStyle = 'rgba(110,170,255,0.95)'; ctx.fillRect(2.6, -1.6, 0.9, 0.9); ctx.fillRect(2.6, 0.7, 0.9, 0.9);
+      ctx.strokeStyle = '#1e1b18'; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.moveTo(0, 2.5); ctx.lineTo(8, 3); ctx.stroke();
+      ctx.restore();
+    }
+  },
   rak(ctx, u, color, t, o) {
     const a = u.facing, ca = Math.cos(a), sa = Math.sin(a);
     for (const [px, py] of [[4, -6], [-4, 6]]) soldier(ctx, px * ca - py * sa, px * sa + py * ca, a, color, t, true, o.moving);
@@ -174,10 +194,11 @@ const DRAW = {
   traeger(ctx, u, color, t, o) { thopter(ctx, u, color, t, o, 'traeger'); },
 };
 
+let BANK = 0;
 function wings(ctx, x, y, len, wid, a, flap, alpha = 1) {
   for (const s of [-1, 1]) {
     ctx.save(); ctx.translate(x, y); ctx.rotate(s * a);
-    const L = len * flap;
+    const L = len * flap * (1 - s * BANK * 0.35);
     const g = ctx.createLinearGradient(0, 0, 0, s * L);
     g.addColorStop(0, `rgba(210,225,235,${0.85 * alpha})`); g.addColorStop(1, `rgba(170,190,205,${0.35 * alpha})`);
     ctx.fillStyle = g;
@@ -194,6 +215,7 @@ function thopter(ctx, u, color, t, o, kind) {
   const ph = t * flapRate + u.id;
   const flapA = 0.55 + 0.45 * Math.abs(Math.sin(ph));
   const flapB = 0.55 + 0.45 * Math.abs(Math.sin(ph + 1.3));
+  BANK = o.bank || 0;
   const big = kind === 'traeger' ? 1.25 : kind === 'bomber' ? 1.3 : kind === 'falke' ? 1.1 : kind === 'jaeger' ? 1.0 : 0.95;
   // Bodenschatten
   ctx.save(); ctx.translate(z * 0.35, z * 0.45); ctx.rotate(u.facing); ctx.scale(big, big);
@@ -202,6 +224,8 @@ function thopter(ctx, u, color, t, o, kind) {
   ctx.beginPath(); ctx.ellipse(2, 0, 3, 16 * flapA, 0, 0, 6.28); ctx.ellipse(-6, 0, 2.5, 12 * flapB, 0, 0, 6.28); ctx.fill();
   ctx.restore();
   ctx.save(); ctx.translate(0, -z); ctx.rotate(u.facing); ctx.scale(big, big);
+  const bank = o.bank || 0;
+  if (bank) ctx.scale(1, 1 - Math.abs(bank) * 0.25);
   // Träger: getragene Einheit
   if (kind === 'traeger' && o.carry) {
     ctx.save(); ctx.scale(0.62, 0.62); ctx.rotate(-u.facing); o.carry(); ctx.restore();
@@ -430,8 +454,8 @@ const BDRAW = {
 };
 
 // ---------- Wurm ----------
-export function drawWormSign(ctx, x, y, t, a = 1) {
-  ctx.save(); ctx.translate(x, y);
+export function drawWormSign(ctx, x, y, t, a = 1, scale = 1) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale);
   for (let k = 0; k < 4; k++) {
     const ph = (t * 0.8 + k / 4) % 1;
     ctx.strokeStyle = `rgba(120,80,40,${(1 - ph) * 0.5 * a})`; ctx.lineWidth = 3 * (1 - ph) + 1;
@@ -441,44 +465,68 @@ export function drawWormSign(ctx, x, y, t, a = 1) {
   ctx.restore();
 }
 
-export function drawWormMaw(ctx, x, y, t, k) {
-  // k: 0..1 Auftauchen
-  ctx.save(); ctx.translate(x, y - 10 * k);
-  const R = 38 * k;
-  ctx.fillStyle = `rgba(0,0,0,${0.35 * k})`; ctx.beginPath(); ctx.ellipse(10, 18, R * 1.1, R * 0.7, 0, 0, 6.28); ctx.fill();
-  // Körpersegmente
-  for (let s = 3; s >= 0; s--) {
-    const rr2 = R * (1.15 + s * 0.12);
-    const g = ctx.createRadialGradient(-rr2 * 0.3, -rr2 * 0.3, rr2 * 0.2, 0, s * 4, rr2);
-    g.addColorStop(0, '#b08a62'); g.addColorStop(1, '#4e3826');
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, s * 4, rr2, 0, 6.28); ctx.fill();
+export function drawWormMaw(ctx, x, y, t, k, scale = 1) {
+  // k: 0..1 Auftauchen — Körper steigt als segmentierte Säule aus dem Sand
+  const R = 30 * scale * (0.55 + 0.45 * k), h = 66 * scale * k;
+  ctx.save(); ctx.translate(x, y);
+  // Loch und Schatten
+  ctx.fillStyle = `rgba(30,18,8,${0.55 * k})`; ctx.beginPath(); ctx.ellipse(0, 0, R * 1.35, R * 0.7, 0, 0, 6.28); ctx.fill();
+  ctx.fillStyle = `rgba(0,0,0,${0.3 * k})`; ctx.beginPath(); ctx.ellipse(R * 0.9, R * 0.35, R * 1.3, R * 0.55, 0, 0, 6.28); ctx.fill();
+  // Körper aus gestapelten, sich verjüngenden Ringen, leicht geneigt
+  const N = 9, lean = 0.55 * scale;
+  let topX = 0;
+  for (let i = 0; i <= N; i++) {
+    const f = i / N, yy = -h * f, ox = Math.sin(f * Math.PI / 2) * R * lean;
+    const rad = R * (1.22 - 0.3 * f) * (1 + Math.sin(i * 2.3 + t * 2) * 0.03);
+    const g = ctx.createLinearGradient(ox - rad, 0, ox + rad, 0);
+    g.addColorStop(0, '#24170e'); g.addColorStop(0.3, '#6f5236'); g.addColorStop(0.5, '#a07c56'); g.addColorStop(0.75, '#5a402a'); g.addColorStop(1, '#1e130b');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(ox, yy, rad, rad * 0.5, 0, 0, 6.28); ctx.fill();
+    ctx.strokeStyle = 'rgba(20,12,6,0.55)'; ctx.lineWidth = 2.2 * scale; ctx.beginPath(); ctx.ellipse(ox, yy, rad, rad * 0.5, 0, 0.1, Math.PI - 0.1); ctx.stroke();
+    ctx.strokeStyle = 'rgba(235,205,160,0.22)'; ctx.lineWidth = 1 * scale; ctx.beginPath(); ctx.ellipse(ox, yy - 2 * scale, rad * 0.9, rad * 0.42, 0, 0.5, Math.PI - 0.5); ctx.stroke();
+    // grobe Hautplatten
+    ctx.fillStyle = 'rgba(30,18,10,0.35)';
+    for (let j = 0; j < 5; j++) { const a = 0.3 + j * 0.6; ctx.fillRect(ox + Math.cos(a) * rad * 0.85 - 1.5, yy + Math.sin(a) * rad * 0.42, 3 * scale, 1.6 * scale); }
+    topX = ox;
   }
-  // Blütenblätter des Schlunds
-  for (let i = 0; i < 4; i++) {
-    const a = i / 4 * 6.28 + 0.4;
-    ctx.save(); ctx.rotate(a); ctx.translate(R * 0.55, 0); ctx.rotate(0.25 * k);
-    const pg = ctx.createLinearGradient(0, 0, R * 0.9, 0); pg.addColorStop(0, '#6a4a30'); pg.addColorStop(1, '#c09468');
-    ctx.fillStyle = pg; ctx.beginPath(); ctx.moveTo(0, -R * 0.42); ctx.quadraticCurveTo(R * 0.9 * k, 0, 0, R * 0.42); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#e6d8b8'; for (let j = -2; j <= 2; j++) { ctx.beginPath(); ctx.moveTo(2, j * R * 0.15 - 2); ctx.lineTo(8 * k, j * R * 0.15); ctx.lineTo(2, j * R * 0.15 + 2); ctx.fill(); }
+  // Sand rieselt die Flanken herab
+  ctx.fillStyle = 'rgba(214,170,110,0.8)';
+  for (let i = 0; i < 18; i++) { const a = (i / 18) * Math.PI, fy = ((t * 70 + i * 17) % Math.max(4, h)); const f = 1 - fy / Math.max(4, h); ctx.fillRect(Math.sin(f * Math.PI / 2) * R * lean + Math.cos(a) * R * (1.22 - 0.3 * f) - 1, -h + fy, 2, 3.5); }
+  ctx.translate(topX, 0);
+  // Schlund oben: drei weit geöffnete Lappen
+  ctx.translate(0, -h);
+  const R0 = R; const Rm = R * 0.95;
+  for (let i = 0; i < 3; i++) {
+    const a = i / 3 * 6.28 - 1.57 + Math.sin(t * 1.5 + i) * 0.05;
+    ctx.save(); ctx.scale(1, 0.62); ctx.rotate(a); ctx.translate(Rm * 0.7, 0); ctx.rotate(0.3 * k);
+    const pg = ctx.createLinearGradient(0, 0, Rm * 1.3, 0); pg.addColorStop(0, '#4a3020'); pg.addColorStop(0.6, '#9a7450'); pg.addColorStop(1, '#d2aa78');
+    ctx.fillStyle = pg; ctx.beginPath(); ctx.moveTo(0, -Rm * 0.75); ctx.quadraticCurveTo(Rm * 1.5 * k, -Rm * 0.2, Rm * 1.2 * k, 0); ctx.quadraticCurveTo(Rm * 1.5 * k, Rm * 0.2, 0, Rm * 0.75); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(40,24,12,0.5)'; ctx.lineWidth = 1.2; for (let j = -1; j <= 1; j++) { ctx.beginPath(); ctx.moveTo(2, j * Rm * 0.3); ctx.quadraticCurveTo(Rm * 0.7 * k, j * Rm * 0.2, Rm * 1.1 * k, 0); ctx.stroke(); }
+    ctx.fillStyle = '#efe2c4'; for (let j = -3; j <= 3; j++) { ctx.beginPath(); ctx.moveTo(1, j * Rm * 0.2 - 2.4); ctx.lineTo(11 * k * scale, j * Rm * 0.18); ctx.lineTo(1, j * Rm * 0.2 + 2.4); ctx.fill(); }
     ctx.restore();
   }
-  // Schlund
-  const g2 = ctx.createRadialGradient(0, 0, 0, 0, 0, R);
-  g2.addColorStop(0, '#120806'); g2.addColorStop(0.7, '#3a1a10'); g2.addColorStop(1, '#7a3a20');
-  ctx.fillStyle = g2; ctx.beginPath(); ctx.arc(0, 0, R * 0.92, 0, 6.28); ctx.fill();
-  // Zahnkränze
+  const rim = ctx.createRadialGradient(0, 0, R * 0.5, 0, 0, R);
+  rim.addColorStop(0, '#2a140a'); rim.addColorStop(0.8, '#6a4630'); rim.addColorStop(1, '#a07a55');
+  ctx.fillStyle = rim; ctx.beginPath(); ctx.ellipse(0, 0, R, R * 0.6, 0, 0, 6.28); ctx.fill();
+  const thr = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 0.8);
+  thr.addColorStop(0, '#000'); thr.addColorStop(0.5, '#1a0904'); thr.addColorStop(1, '#4a2414');
+  ctx.fillStyle = thr; ctx.beginPath(); ctx.ellipse(0, 0, R * 0.82, R * 0.5, 0, 0, 6.28); ctx.fill();
   for (let ring = 0; ring < 3; ring++) {
-    const rad = R * (0.85 - ring * 0.22), n = 18 - ring * 4;
+    const rad = R * (0.78 - ring * 0.2), n = 22 - ring * 5;
     for (let i = 0; i < n; i++) {
-      const a = i / n * 6.28 + t * (ring % 2 ? 0.6 : -0.4);
-      ctx.fillStyle = ring === 0 ? '#e8dcc0' : '#bfae8c';
+      const a = i / n * 6.28 + t * (ring % 2 ? 0.7 : -0.5);
+      const cx = Math.cos(a), cy = Math.sin(a) * 0.6;
+      ctx.fillStyle = ring === 0 ? '#f1e5c8' : ring === 1 ? '#cdbb96' : '#9a8668';
       ctx.beginPath();
-      ctx.moveTo(Math.cos(a - 0.12) * rad, Math.sin(a - 0.12) * rad);
-      ctx.lineTo(Math.cos(a) * (rad - 6 * k), Math.sin(a) * (rad - 6 * k));
-      ctx.lineTo(Math.cos(a + 0.12) * rad, Math.sin(a + 0.12) * rad);
+      ctx.moveTo(Math.cos(a - 0.1) * rad, Math.sin(a - 0.1) * rad * 0.6);
+      ctx.lineTo(cx * (rad - 7 * k * scale), cy * (rad - 7 * k * scale));
+      ctx.lineTo(Math.cos(a + 0.1) * rad, Math.sin(a + 0.1) * rad * 0.6);
       ctx.fill();
     }
   }
+  // schwaches Glühen tief im Schlund
+  ctx.globalCompositeOperation = 'lighter';
+  const gl = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 0.35); gl.addColorStop(0, `rgba(255,120,40,${0.35 * k})`); gl.addColorStop(1, 'rgba(255,120,40,0)');
+  ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(0, 0, R * 0.35, 0, 6.28); ctx.fill();
   ctx.restore();
 }
 
@@ -566,4 +614,34 @@ export function cardArt(id) {
   if (sym) sym();
   cardCache.set(id, cv);
   return cv;
+}
+
+// Sandtrichter: der Boden sackt ein, Sand strömt spiralförmig zur Mitte
+export function drawSandWhirl(ctx, x, y, t, k, scale = 1) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale * 0.8);
+  const R = 52 * k;
+  const g = ctx.createRadialGradient(0, 0, 2, 0, 0, R);
+  g.addColorStop(0, `rgba(40,24,12,${0.75 * k})`); g.addColorStop(0.6, `rgba(110,70,35,${0.45 * k})`); g.addColorStop(1, 'rgba(170,120,70,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, R, 0, 6.28); ctx.fill();
+  ctx.strokeStyle = `rgba(235,195,140,${0.5 * k})`; ctx.lineWidth = 1.6;
+  for (let i = 0; i < 10; i++) {
+    const a0 = i / 10 * 6.28 + t * 2.2;
+    ctx.beginPath();
+    for (let j = 0; j <= 12; j++) { const f = j / 12, rr2 = R * (1 - f * 0.85), a = a0 + f * 2.4; const px = Math.cos(a) * rr2, py = Math.sin(a) * rr2; j ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Wandernde Sandwelle über einem Wurm unter der Oberfläche
+export function drawWormRidge(ctx, x, y, ang, t, scale = 1) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(ang); ctx.scale(scale, scale);
+  const g = ctx.createRadialGradient(-6, -4, 2, 0, 0, 34);
+  g.addColorStop(0, 'rgba(255,225,170,0.55)'); g.addColorStop(0.5, 'rgba(200,150,95,0.35)'); g.addColorStop(1, 'rgba(120,80,40,0)');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(-8, 0, 40, 18, 0, 0, 6.28); ctx.fill();
+  ctx.fillStyle = 'rgba(60,35,18,0.3)'; ctx.beginPath(); ctx.ellipse(-4, 8, 36, 7, 0, 0, 6.28); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,235,195,0.6)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(20, 0); ctx.quadraticCurveTo(-10, -12, -46, -4); ctx.stroke();
+  for (let k = 0; k < 3; k++) { const ph = (t * 1.6 + k / 3) % 1; ctx.strokeStyle = `rgba(150,105,60,${0.4 * (1 - ph)})`; ctx.beginPath(); ctx.ellipse(-10 - ph * 40, 0, 20 + ph * 16, 10 + ph * 8, 0, 0, 6.28); ctx.stroke(); }
+  ctx.restore();
 }

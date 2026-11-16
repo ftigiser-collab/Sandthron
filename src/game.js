@@ -1,5 +1,5 @@
 // Spielregeln und Zustand (rundenbasiert)
-import { UNITS, BUILDINGS, WEAPONS, ARMOR_MOD, TERRAIN, MOVE_COST, FACTIONS, START_CREDITS, DROPS, CARDS } from './data.js';
+import { UNITS, BUILDINGS, WEAPONS, ARMOR_MOD, TERRAIN, MOVE_COST, FACTIONS, START_CREDITS, DROPS, CARDS, WORM_SIZES } from './data.js';
 import { neighbors, distance, ring, center } from './hex.js';
 const ang = (c1, r1, c2, r2) => { const a = center(c1, r1), b = center(c2, r2); return Math.atan2(b.y - a.y, b.x - a.x); };
 import { mulberry32 } from './util.js';
@@ -40,7 +40,7 @@ export class Game {
   }
   moveOf(u) {
     const pk = this.players[u.owner].perk;
-    return u.def.move + (u.def.mt === 'air' && pk.airMove ? pk.airMove : 0) + (u.def.mt === 'foot' && pk.infMove ? pk.infMove : 0);
+    return u.def.move + (u.def.mt === 'air' && pk.airMove ? pk.airMove : 0) + ((u.def.mt === 'foot' || u.def.mt === 'sandfoot') && pk.infMove ? pk.infMove : 0);
   }
   dropCost(owner, id) {
     const p = this.players[owner];
@@ -430,6 +430,7 @@ export class Game {
       if (u.dead || u.owner !== owner) continue;
       u.moved = false; u.acted = false; u.harvested = false; u.attacked = false; u.reflex = false; u.ambushed = false;
       if (u.voiceCd > 0) u.voiceCd--;
+      if (u.thumpCd > 0) u.thumpCd--;
       if (u.shield > 0) u.shield--;
       if (u.stunned > 0) { u.stunned--; u.moved = true; u.acted = true; u.wasStunned = true; } else u.wasStunned = false;
       if (u.def.ammo && u.ammo < u.def.ammo) {
@@ -456,7 +457,7 @@ export class Game {
     const foe = 1 - owner, vis = (c, r) => owner !== 0 || this.visible[this.i(c, r)];
     const t = CARDS[id].target;
     if (t === 'enemyUnit') return this.units.filter((u) => !u.dead && !u.carried && u.owner === foe && vis(u.c, u.r)).map((u) => [u.c, u.r]);
-    if (t === 'enemyInf') return this.units.filter((u) => !u.dead && !u.carried && u.owner === foe && u.def.mt === 'foot' && vis(u.c, u.r)).map((u) => [u.c, u.r]);
+    if (t === 'enemyInf') return this.units.filter((u) => !u.dead && !u.carried && u.owner === foe && u.def.cat === 'inf' && vis(u.c, u.r)).map((u) => [u.c, u.r]);
     if (t === 'enemyBld') return this.buildings.filter((b) => !b.dead && b.owner === foe && (owner !== 0 || this.explored[this.i(b.c, b.r)])).map((b) => [b.c, b.r]);
     if (t === 'own') return [...this.units.filter((u) => !u.dead && !u.carried && u.owner === owner).map((u) => [u.c, u.r]), ...this.buildings.filter((b) => !b.dead && b.owner === owner).map((b) => [b.c, b.r])];
     if (t === 'sandHex') { const out = []; for (let r = 0; r < this.H; r++) for (let c = 0; c < this.W; c++) if (this.isSand(c, r) && (owner !== 0 || this.explored[this.i(c, r)])) out.push([c, r]); return out; }
@@ -558,6 +559,7 @@ export class Game {
     for (const u of this.units) {
       if (u.dead || u.owner !== owner || u.carried || u.def.mt === 'air' || !this.isSand(u.c, u.r)) { if (!u.dead) { u.vib = 0; u.fought = false; } continue; }
       const veh = u.def.cat === 'veh';
+      if (u.def.vib === 0) { u.vib = u.fought ? 1 : 0; u.fought = false; continue; }
       u.vib = u.harvested ? 4 : u.dropped ? 3 : u.moved ? (veh ? 2.5 : 1.2) : (veh ? 0.8 : 0.3);
       if (u.fought) u.vib += 2;
       u.dropped = false; u.fought = false;
@@ -664,7 +666,10 @@ export class Game {
       }
       if (c === undefined) return null;
     }
-    const w = { id: NEXT++, isWorm: true, c, r, sated: 0, surfaced: false, facing: 0 };
+    let size = 1, x = this.rnd() * 100;
+    for (const [k, v] of Object.entries(WORM_SIZES)) { x -= v.weight; if (x <= 0) { size = Number(k); break; } }
+    if (this.worms.some((w) => w.size === 3) && size === 3) size = 2;
+    const w = { id: NEXT++, isWorm: true, c, r, sated: 0, surfaced: false, facing: 0, size };
     this.worms.push(w); this.byId.set(w.id, w);
     return w;
   }
@@ -681,9 +686,10 @@ export class Game {
         w.c = last.c; w.r = last.r;
         if (last.c === th.c && last.r === th.r) {
           th.used = true; w.sated = 2;
-          const eaten = this.units.filter((u) => !u.dead && !u.carried && u.def.mt !== 'air' && this.isSand(u.c, u.r) && distance(u.c, u.r, th.c, th.r) <= 1);
+          const hexes = [...new Set([...ring(th.c, th.r, 1, this.W, this.H).filter(([c, r]) => this.isSand(c, r)), ...this.wormBite(w, th.c, th.r)].map((h) => h.join(',')))].map((k) => k.split(',').map(Number));
+          const eaten = this.units.filter((u) => !u.dead && !u.carried && u.def.mt !== 'air' && hexes.some(([c, r]) => c === u.c && r === u.r));
           for (const u of eaten) this.kill(u);
-          ev.push({ type: 'worm', id: w.id, path, eatMany: eaten.map((u) => u.id), thumper: true });
+          ev.push({ type: 'worm', id: w.id, path, eatMany: eaten.map((u) => u.id), eatHexes: hexes, thumper: true });
           if (eaten.some((u) => u.owner === 1)) this.say(`Der Klopfer hat einen Wurm angelockt — ${eaten.filter((u) => u.owner === 1).length} feindliche Einheiten verschlungen!`, 'good');
           if (eaten.some((u) => u.owner === 0)) this.say('Ein Wurm folgte einem Klopfer und verschlang eure Einheiten!', 'bad');
           return ev;
@@ -721,16 +727,16 @@ export class Game {
         const chain = []; let k = key(best.c, best.r);
         while (k !== null) { chain.push({ c: k % this.W, r: Math.floor(k / this.W) }); k = prev.get(k); }
         chain.reverse();
-        const steps = chain.slice(1, 7);
+        const steps = chain.slice(1, 1 + WORM_SIZES[w.size || 1].steps);
         path.push(...steps);
         const last = steps[steps.length - 1];
         w.c = last.c; w.r = last.r;
         if (last.c === best.c && last.r === best.r) {
-          this.kill(best);
-          const extra = this.units.filter((u) => !u.dead && !u.carried && u.def.mt !== 'air' && this.isSand(u.c, u.r) && distance(u.c, u.r, last.c, last.r) === 1 && this.rnd() < 0.35);
-          for (const u of extra) this.kill(u);
-          w.sated = 1;
-          ev.push({ type: 'worm', id: w.id, path, eatMany: [best.id, ...extra.map((u) => u.id)], owner: best.owner });
+          const hexes = this.wormBite(w, last.c, last.r);
+          const eaten = this.units.filter((u) => !u.dead && !u.carried && u.def.mt !== 'air' && hexes.some(([c, r]) => c === u.c && r === u.r));
+          for (const u of eaten) this.kill(u);
+          w.sated = WORM_SIZES[w.size || 1].sated;
+          ev.push({ type: 'worm', id: w.id, path, eatMany: eaten.map((u) => u.id), eatHexes: hexes, owner: best.owner });
           if (best.owner === 0) this.say(`Ein Wurm hat euren ${best.def.name} verschlungen!`, 'bad');
           return ev;
         }
@@ -751,6 +757,29 @@ export class Game {
     const near = this.units.some((u) => !u.dead && u.owner === 0 && !u.carried && u.def.mt !== 'air' && this.isSand(u.c, u.r) && distance(u.c, u.r, w.c, w.r) <= 5);
     if (near) this.say('Wurmzeichen! Einheiten auf Fels bringen', 'warn');
     return ev;
+  }
+
+  // Biss eines Wurms: Größe 1 ein Feld, Größe 2 drei Felder, Größe 3 sieben Felder
+  wormBite(w, c, r) {
+    const size = w.size || 1;
+    const sandN = neighbors(c, r, this.W, this.H).filter(([nc, nr]) => this.isSand(nc, nr));
+    if (size === 1) return [[c, r]];
+    if (size === 2) {
+      const withUnits = sandN.filter(([nc, nr]) => this.unitAt(nc, nr, false));
+      const rest = sandN.filter((h) => !withUnits.includes(h));
+      return [[c, r], ...[...withUnits, ...rest].slice(0, 2)];
+    }
+    return [[c, r], ...sandN];
+  }
+
+  // ---------- Sandgänger: Klopfer setzen ----------
+  canThump(u) { return u.def.thumper && !(u.thumpCd > 0) && !u.acted && u.owner === this.current; }
+  thumpHexes(u) { return ring(u.c, u.r, 2, this.W, this.H).filter(([c, r]) => this.isSand(c, r) && !this.thumpers.some((t) => t.c === c && t.r === r)); }
+  thump(u, c, r) {
+    this.thumpers.push({ c, r, owner: u.owner, life: 2 });
+    u.thumpCd = 3; u.acted = true; u.moved = true;
+    if (u.owner === 0) this.say('Klopfer gesetzt — Würmer im Umkreis von 12 Feldern werden angelockt', 'good');
+    return { type: 'thump', u: u.id, c, r };
   }
 
   sandRoute(sc, sr, tc, tr, pass) {

@@ -43,12 +43,12 @@ export class FX {
       this.add({ kind: 'debris', x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: 60 + R() * 120, life: 0.8 + R() * 0.6, size: 1.5 + R() * 2.5, col, a: 1 });
     }
   }
-  sandBurst(x, y, n = 30, radius = 30) {
+  sandBurst(x, y, n = 30, radius = 30, dustN = 18) {
     for (let i = 0; i < n; i++) {
       const a = R() * Math.PI * 2, s = 30 + R() * 110;
       this.add({ kind: 'debris', x: x + Math.cos(a) * radius * R(), y: y + Math.sin(a) * radius * R(), vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: 80 + R() * 200, life: 0.9 + R() * 0.8, size: 2 + R() * 3, col: '214,168,104', a: 1 });
     }
-    this.dust(x, y, 18, '206,160,100', radius * 1.6, 12);
+    this.dust(x, y, dustN, '206,160,100', radius * 1.6, 12);
   }
 
   explosion(x, y, size = 1) {
