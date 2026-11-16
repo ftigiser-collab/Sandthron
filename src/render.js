@@ -92,6 +92,27 @@ export class Renderer {
     return out;
   }
 
+  microPattern(ctx) {
+    if (this._micro) return this._micro;
+    const n = 512, cv = document.createElement('canvas'); cv.width = cv.height = n;
+    const c = cv.getContext('2d'), img = c.createImageData(n, n), h = new Float32Array(n * n);
+    const N = new Noise(4711);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      // kachelbar: Rauschen auf einem Torus
+      const a = x / n * 6.2832, b = y / n * 6.2832;
+      h[y * n + x] = N.fbm(Math.cos(a) * 9 + 20, Math.sin(a) * 9 + Math.cos(b) * 9, 3) * 0.6 + Math.random() * 0.4;
+    }
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const i = y * n + x, dx = h[y * n + ((x + 1) % n)] - h[y * n + ((x - 1 + n) % n)], dy = h[((y + 1) % n) * n + x] - h[((y - 1 + n) % n) * n + x];
+      const v = clamp(128 - (dx + dy) * 160, 0, 255);
+      img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v; img.data[i * 4 + 3] = 255;
+    }
+    c.putImageData(img, 0, 0);
+    const p = ctx.createPattern(cv, 'repeat');
+    if (p.setTransform) p.setTransform(new DOMMatrix().scale(0.5, 0.5));
+    return (this._micro = p);
+  }
+
   renderSpiceLayer() {
     const g = this.g, base = g.map.base;
     const cv = this.spiceLayer || (this.spiceLayer = document.createElement('canvas'));
@@ -143,6 +164,13 @@ export class Renderer {
 
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(g.map.base, 0, 0);
+    if (cam.z > 1.1) {
+      // Mikrorelief: feine, scharfe Körnung beim Reinzoomen
+      const mp = this.microPattern(ctx);
+      ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = Math.min(0.5, (cam.z - 1.1) * 0.6);
+      ctx.fillStyle = mp; ctx.fillRect(view.x0, view.y0, view.x1 - view.x0, view.y1 - view.y0);
+      ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+    }
     this.drawSandDrift(ctx);
     this.drawHeat(ctx);
 
