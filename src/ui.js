@@ -314,6 +314,7 @@ export class Controller {
         const p = this.r.posOf(b); b.rise = 0; this.fx.dust(p.x, p.y, 14, '170,150,120', 40, 8); this.tween(0.6, (k) => { b.rise = k; });
       } else if (ev.type === 'orbital') await this.animOrbital(ev);
       else if (ev.type === 'endgame') await this.animEndgame(ev);
+      else if (ev.type === 'rescue') await this.animRescue(ev);
       else if (ev.type === 'strike') await this.animStrike(ev);
       else if (ev.type === 'card') { if (ev.owner === 0) { this.pulse('#cardsbtn'); this.refresh(); } }
       else if (ev.type === 'income') {
@@ -721,6 +722,29 @@ export class Controller {
       u.z = undefined;
     }
     if (u.owner === 0) { g.updateVision(); this.r.fogDirty = true; }
+  }
+
+  // Notrettung: Träger stürzt heran, packt den Ernter und fliegt ihn auf Fels
+  async animRescue(ev) {
+    const g = this.g, car = g.get(ev.car), h = g.get(ev.h); if (!car || !h) return;
+    const seen = car.owner === 0 || g.visible[g.i(ev.at.c, ev.at.r)];
+    if (!seen) return;
+    const A = center(ev.from.c, ev.from.r), B = center(ev.at.c, ev.at.r), C = center(ev.to.c, ev.to.r);
+    this.r.centerOn(B.x, B.y); 
+    h.vis = { ...B };
+    car.facing = Math.atan2(B.y - A.y, B.x - A.x);
+    await this.tween(0.7, (k) => { const e = k * k * (3 - 2 * k); car.vis = { x: A.x + (B.x - A.x) * e, y: A.y + (B.y - A.y) * e }; });
+    this.r.float(B.x, B.y - 40, 'Notrettung!', '#8ef08a', true);
+    await this.tween(0.35, (k) => { car.z = 26 - 18 * k; if (Math.random() < 0.8) this.fx.dust(B.x + (Math.random() - 0.5) * 30, B.y + (Math.random() - 0.5) * 20, 1, '205,165,112', 26, 7); });
+    h.carried = true; car.carrying = h.id;
+    await this.tween(0.35, (k) => { car.z = 8 + 18 * k; });
+    car.facing = Math.atan2(C.y - B.y, C.x - B.x);
+    await this.tween(0.8, (k) => { const e = k * k * (3 - 2 * k); car.vis = { x: B.x + (C.x - B.x) * e, y: B.y + (C.y - B.y) * e }; h.vis = car.vis; });
+    await this.tween(0.3, (k) => { car.z = 26 - 18 * k; });
+    h.carried = false; car.carrying = 0; h.vis = null; this.fx.dust(C.x, C.y, 10, '205,165,112', 30, 7);
+    await this.tween(0.3, (k) => { car.z = 8 + 18 * k; });
+    car.vis = null; car.z = undefined;
+    if (car.owner === 0) { g.updateVision(); this.r.fogDirty = true; }
   }
 
   async animPickup(car, t) {

@@ -83,7 +83,9 @@ export async function autoCarry(g, car, act) {
   for (const h of harvs) {
     const danger = g.isSand(h.c, h.r) ? Math.max(0, 6 - wormD(h.c, h.r)) : 0;
     let need = 0, goal = null;
-    if (danger >= 2) { need = 10 + danger; goal = h.cargo > h.def.capacity * 0.4 ? 'ref' : 'spice'; }
+    const locked = g.worms.some((w) => w.lock === h.id);
+    if (locked) { need = 40; goal = h.cargo > h.def.capacity * 0.3 ? 'ref' : 'spice'; }
+    else if (danger >= 2) { need = 10 + danger; goal = h.cargo > h.def.capacity * 0.4 ? 'ref' : 'spice'; }
     // Volle Ernter fliegen immer per Träger zurück zur Raffinerie
     else if (h.cargo >= h.def.capacity - 1 && refD(h) > 1) { need = 8 + refD(h); goal = 'ref'; }
     else if (h.cargo < h.def.capacity && g.spiceAt(h.c, h.r) <= 0 && h.cargo < h.def.capacity * 0.3) {

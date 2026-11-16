@@ -981,12 +981,14 @@ export class Game {
         const last = steps[steps.length - 1] || { c: w.c, r: w.r };
         w.c = last.c; w.r = last.r;
         if (locked && last.c === best.c && last.r === best.r) {
+          // Notrettung: ein freier Träger reißt den bedrohten Ernter im letzten Moment aus dem Sand
+          if (best.def.harvester) { const rs = this.emergencyLift(best, w); if (rs) ev.push(rs); }
           const hexes = this.wormBite(w, last.c, last.r);
           const eaten = this.units.filter((u) => !u.dead && !u.carried && u.def.mt !== 'air' && hexes.some(([c, r]) => c === u.c && r === u.r));
           for (const u of eaten) { this.kill(u); this.players[u.owner].stats.eaten++; }
           w.sated = WORM_SIZES[w.size || 1].sated; w.lock = null;
           ev.push({ type: 'worm', id: w.id, path, eatMany: eaten.map((u) => u.id), eatHexes: hexes, owner: best.owner });
-          if (best.owner === 0) this.say(`Ein Wurm hat euren ${best.def.name} verschlungen!`, 'bad');
+          if (best.owner === 0 && eaten.includes(best)) this.say(`Ein Wurm hat euren ${best.def.name} verschlungen!`, 'bad');
           return ev;
         }
         if (!stalking) {
@@ -1011,6 +1013,28 @@ export class Game {
     const near = this.units.some((u) => !u.dead && u.owner === 0 && !u.carried && u.def.mt !== 'air' && this.isSand(u.c, u.r) && distance(u.c, u.r, w.c, w.r) <= 5);
     if (near) this.say('Wurmzeichen! Einheiten auf Fels bringen', 'warn');
     return ev;
+  }
+
+  emergencyLift(h, w) {
+    const car = this.units.filter((u) => !u.dead && u.owner === h.owner && u.def.carrier && u.auto && !u.carrying && !u.carried && distance(u.c, u.r, h.c, h.r) <= 12)
+      .sort((a, b) => distance(a.c, a.r, h.c, h.r) - distance(b.c, b.r, h.c, h.r))[0];
+    if (!car) return null;
+    const refs = this.buildings.filter((b) => !b.dead && b.owner === h.owner && b.type === 'raffinerie' && b.turnsLeft <= 0);
+    // Ziel: freies Feld an der Raffinerie, sonst nächster Fels abseits des Wurms
+    let dest = null, bd = 1e9;
+    const cands = refs.length ? refs.flatMap((b) => neighbors(b.c, b.r, this.W, this.H)) : ring(h.c, h.r, 5, this.W, this.H);
+    for (const [c, r] of cands) {
+      if (!this.groundFree(c, r) || this.cost(h.def.mt, c, r) === Infinity || this.inStorm(c, r) || this.isSand(c, r)) continue;
+      const d = distance(c, r, h.c, h.r) - distance(c, r, w.c, w.r) * 0.2;
+      if (d < bd) { bd = d; dest = [c, r]; }
+    }
+    if (!dest) return null;
+    const from = { c: car.c, r: car.r }, at = { c: h.c, r: h.r };
+    h.c = dest[0]; h.r = dest[1]; h.waitCarry = 0;
+    car.c = dest[0]; car.r = dest[1]; car.acted = true; car.moved = true;
+    w.lock = null;
+    if (h.owner === 0) this.say('Notrettung! Der Ernte-Träger hat den Ernter vor dem Wurm gerettet', 'good');
+    return { type: 'rescue', car: car.id, h: h.id, from, at, to: { c: dest[0], r: dest[1] } };
   }
 
   // Biss eines Wurms: Größe 1 ein Feld, Größe 2 drei Felder, Größe 3 sieben Felder
