@@ -1,9 +1,10 @@
 // Renderer: Kamera, Gelände, Glut, Markierungen, Einheiten, Sturm, Nebel
 import { center, hexPath, R, HW, ring, distance, pixelToHex } from './hex.js';
-import { drawUnit, drawBuilding, drawWormSign, drawWormMaw, drawPod, drawThumper, drawSandWhirl, drawWormRidge } from './sprites.js';
+import { drawUnit, drawBuilding, drawWormSign, drawWormMaw, drawPod, drawThumper, drawSandWhirl, drawWormRidge, drawWormTop, drawWormBody } from './sprites.js';
 import { WORM_SIZES } from './data.js';
 import { clamp, rgba, Noise, smoothstep } from './util.js';
 import { tintedBlob } from './fx.js';
+import { drawPoi } from './poiart.js';
 
 const FILTER_OK = (() => { try { const c = document.createElement('canvas').getContext('2d'); c.filter = 'blur(2px)'; return c.filter === 'blur(2px)'; } catch { return false; } })();
 
@@ -199,6 +200,11 @@ export class Renderer {
     this.drawStormForecast(ctx);
     this.fx.drawDecals(ctx);
 
+    for (const po of g.pois || []) {
+      if (!g.explored[g.i(po.c, po.r)]) continue;
+      const p = center(po.c, po.r); if (p.x < view.x0 || p.x > view.x1 || p.y < view.y0 || p.y > view.y1) continue;
+      drawPoi(ctx, p.x, p.y, po.type, po.owner >= 0 ? g.players[po.owner].color : null, this.t);
+    }
     this.drawWrecks(ctx, dt);
     for (const th of g.thumpers) if (th.owner === 0 || g.visible[g.i(th.c, th.r)]) { const p = center(th.c, th.r); drawThumper(ctx, p.x, p.y, this.t); }
     for (const st of g.strikes) {
@@ -255,6 +261,19 @@ export class Renderer {
       else if (seen && w.vis) drawWormRidge(ctx, p.x, p.y, w.dir || 0, this.t, sc);
       else if (seen) {
         drawWormSign(ctx, p.x, p.y, this.t, 1, sc);
+        // Gewittertes Ziel: Warnmarke mit Linie zum Wurm (nur eigene Einheiten oder sichtbare)
+        const tg = w.lock && g.byId.get(w.lock);
+        if (tg && !tg.dead && (tg.owner === 0 || g.seen(tg))) {
+          const q = center(tg.c, tg.r), pu = 0.5 + 0.5 * Math.sin(this.t * 5);
+          ctx.save(); ctx.setLineDash([5, 6]); ctx.lineDashOffset = -this.t * 30;
+          ctx.strokeStyle = `rgba(255,90,50,${0.35 + 0.25 * pu})`; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y); ctx.stroke(); ctx.setLineDash([]);
+          ctx.strokeStyle = `rgba(255,80,40,${0.6 + 0.4 * pu})`; ctx.lineWidth = 2.5;
+          ctx.beginPath(); hexPath(ctx, q.x, q.y, R - 4 - pu * 3); ctx.stroke();
+          ctx.fillStyle = 'rgba(30,8,4,0.8)'; ctx.beginPath(); ctx.arc(q.x, q.y - R + 6, 9, 0, 6.28); ctx.fill();
+          ctx.fillStyle = '#ff7050'; ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('!', q.x, q.y - R + 6.5);
+          ctx.restore();
+        }
         if (w.vis && Math.random() < 0.7) { this.fx.dust(p.x, p.y, 2, '200,150,95', 30, 9); this.fx.add({ kind: 'debris', x: p.x + (Math.random() - 0.5) * 30, y: p.y, vx: (Math.random() - 0.5) * 40, vy: (Math.random() - 0.5) * 20, vz: 60 + Math.random() * 80, life: 0.8, size: 2.5, col: '214,168,104', a: 1 }); }
       }
     }
@@ -266,7 +285,11 @@ export class Renderer {
     for (const u of ground) this.drawUnitFull(ctx, u);
     this.fx.draw(ctx, 'ground', view);
     this.fx.draw(ctx, 'air', view);
-    for (const w of g.worms) if (w.surface > 0) { const p = w.vis || center(w.c, w.r); drawWormMaw(ctx, p.x, p.y, this.t, w.surface, WORM_SIZES[w.size || 1].scale); }
+    for (const w of g.worms) if (w.surface > 0 || w.body) {
+      const p = w.vis || center(w.c, w.r), sc = WORM_SIZES[w.size || 1].scale;
+      if (w.body && w.body.length > 1) drawWormBody(ctx, w.body, 34 * sc, this.t, sc);
+      if (w.surface > 0) drawWormTop(ctx, p.x, p.y, this.t, w.surface, sc, w.dir || 0, w.open ?? w.surface);
+    }
     for (const u of air) this.drawUnitFull(ctx, u);
     for (const pd of this.pods) drawPod(ctx, pd.x, pd.y, pd.h, pd.open, pd.color, this.t);
     this.drawProjectiles(ctx);

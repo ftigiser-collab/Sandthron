@@ -1,5 +1,5 @@
 // Steuerung: Eingabe, Auswahl, Menüs, Animationen, Rundenablauf
-import { UNITS, BUILDINGS, WEAPONS, TERRAIN, MOVE_COST, CARDS, DROPS, FACTIONS, ARMOR_MOD, ORBITAL_STRIKE } from './data.js';
+import { UNITS, BUILDINGS, WEAPONS, TERRAIN, MOVE_COST, CARDS, DROPS, FACTIONS, ARMOR_MOD, ORBITAL_STRIKE , POIS } from './data.js';
 import { center, pixelToHex, distance, R, ring } from './hex.js';
 import { icon, cardArt } from './sprites.js';
 import { angDiff } from './util.js';
@@ -151,7 +151,12 @@ export class Controller {
     });
   }
 
+  // Kämpfe laufen bewusst langsamer, damit man Treffer und Konter verfolgen kann
   async animAttack(ev) {
+    const sp = this.speed; this.speed = sp * 0.65;
+    try { await this.animAttackInner(ev); } finally { this.speed = sp; }
+  }
+  async animAttackInner(ev) {
     const g = this.g;
     const a = g.byId.get(ev.att), t = g.byId.get(ev.target);
     if (!a || !t) return;
@@ -286,6 +291,11 @@ export class Controller {
       else if (ev.type === 'card') { if (ev.owner === 0) { this.pulse('#cardsbtn'); this.refresh(); } }
       else if (ev.type === 'income') {
         if (ev.owner === 0) { const b = g.buildings.find((x) => x.owner === 0 && x.type === 'bauhof'); if (b) { const p = center(b.c, b.r); this.r.float(p.x, p.y - 20, `+${ev.amount} Credits`, '#8ef08a'); } }
+      } else if (ev.type === 'poi') {
+        const p = center(ev.poi.c, ev.poi.r), col = g.players[ev.owner].color;
+        if (g.explored[g.i(ev.poi.c, ev.poi.r)]) { this.fx.ring(p.x, p.y, 16, '255,230,170', 0.6); this.fx.flash(p.x, p.y, 40, '255,220,150', 0.3); this.r.float(p.x, p.y - 34, `${POIS[ev.poi.type].name} eingenommen`, col, true); }
+      } else if (ev.type === 'heal') {
+        const u = g.get(ev.u); if (u && g.seen(u)) { const p = this.r.posOf(u); this.r.float(p.x, p.y - 22, `+${ev.amount}`, '#8ef08a'); this.fx.add({ kind: 'glow', x: p.x, y: p.y, life: 0.6, size: 18, grow: 20, col: '140,255,160', a: 0.5 }); }
       } else if (ev.type === 'rearm') {
         const u = g.get(ev.u); if (u && u.owner === 0) { const p = this.r.posOf(u); this.r.float(p.x, p.y - 26, 'Aufmunitioniert', '#a0e0ff'); }
       } else if (ev.type === 'storm') await this.animStorm(ev);
@@ -364,26 +374,46 @@ export class Controller {
         for (const v of victims) { const p0 = center(v.c, v.r); v.vis = { x: p0.x + (end.x - p0.x) * k * 0.5 + (Math.random() - 0.5) * 3, y: p0.y + (end.y - p0.y) * k * 0.5 + (Math.random() - 0.5) * 3 }; }
         for (const hp of hexPts) if (Math.random() < 0.5) fx.dust(hp.x + (Math.random() - 0.5) * 50, hp.y + (Math.random() - 0.5) * 40, 1, '190,140,85', 10, 6);
       });
-      // 3. Ausbruch: der Wurm schießt aus dem Sand
-      fx.shake = 14 * sc;
+      // 3. Ausbruch von unten nach oben: Kopf steigt Richtung Kamera, Schlund klappt auf
+      fx.shake = 12 * sc;
       for (const hp of hexPts) fx.sandBurst(hp.x, hp.y, 22, 30, 3);
-      fx.sandBurst(end.x, end.y, 60 * sc, 46 * sc, 6);
-      fx.ring(end.x, end.y, 20 * sc, '240,210,160', 0.6);
-      await this.tween(0.5, (k) => {
-        w.surface = 1 - (1 - k) * (1 - k);
-        for (const v of victims) { const p0 = v.vis; v.vis = { x: p0.x + (end.x - p0.x) * 0.25, y: p0.y + (end.y - p0.y) * 0.25 }; v.sink = k; }
+      fx.sandBurst(end.x, end.y, 50 * sc, 40 * sc, 6);
+      fx.ring(end.x, end.y, 22 * sc, '240,210,160', 0.6);
+      w.open = 0;
+      await this.tween(0.7, (k) => {
+        w.surface = 1 - (1 - k) * (1 - k); w.open = Math.max(0, (k - 0.35) / 0.65) * 0.6;
+        for (const v of victims) { const p0 = v.vis; v.vis = { x: p0.x + (end.x - p0.x) * 0.2, y: p0.y + (end.y - p0.y) * 0.2 }; v.sink = k; }
       });
       for (const v of victims) v.gone = true;
-      this.r.float(end.x, end.y - 40 * sc, victims.length ? (victims.length > 1 ? `${victims.length} Einheiten verschlungen!` : 'Verschlungen!') : 'Der Köder ist weg', '#ff7050', true);
-      // 4. Mächtiges Verharren: Zähne mahlen, Sand rieselt vom Rand
-      await this.tween(0.9, (k) => {
-        fx.shake = Math.max(fx.shake, 2.5 * sc);
-        if (Math.random() < 0.9) { const a = Math.random() * 6.28, rr = 38 * sc; fx.add({ kind: 'debris', x: end.x + Math.cos(a) * rr, y: end.y + Math.sin(a) * rr * 0.8 - 20 * sc, vx: -Math.cos(a) * 20, vy: 10, vz: 30, life: 0.8, size: 2 + Math.random() * 2, col: '214,168,104', a: 1 }); }
+      this.r.float(end.x, end.y - 46 * sc, victims.length ? (victims.length > 1 ? `${victims.length} Einheiten verschlungen!` : 'Verschlungen!') : 'Der Köder ist weg', '#ff7050', true);
+      await this.tween(0.45, (k) => { w.open = 0.6 + 0.4 * k; });
+      // 4. Verharren: Zahnringe mahlen, Sand rieselt in den Schlund
+      await this.tween(1.1, (k) => {
+        fx.shake = Math.max(fx.shake, 2 * sc);
+        if (Math.random() < 0.8) { const a = Math.random() * 6.28, rr = 46 * sc; fx.add({ kind: 'debris', x: end.x + Math.cos(a) * rr, y: end.y + Math.sin(a) * rr, vx: -Math.cos(a) * 30, vy: -Math.sin(a) * 30, vz: 20, life: 0.7, size: 2 + Math.random() * 2, col: '214,168,104', a: 1 }); }
       });
-      // 5. Abtauchen
-      await this.tween(0.8, (k) => { w.surface = 1 - k; w.whirl = 1 - k; if (Math.random() < 0.5) fx.dust(end.x, end.y, 3, '200,150,95', 40 * sc, 10 * sc); });
+      // 5. Schlund schließt sich, der Wurm kippt nach vorn und taucht ab; sein Rücken gleitet durch den Sand
+      await this.tween(0.35, (k) => { w.open = 1 - k; });
+      const dir = w.dir || 0, ux = Math.cos(dir), uy = Math.sin(dir), nx = -uy, ny = ux;
+      const D = 140 * sc, bend = 20 * sc * (Math.random() < 0.5 ? -1 : 1);
+      const at = (f) => ({ x: end.x + ux * D * f + nx * Math.sin(f * Math.PI) * bend, y: end.y + uy * D * f + ny * Math.sin(f * Math.PI) * bend });
+      const body = (f0, f1) => { const pts = []; for (let i = 0; i <= 16; i++) { const f = f0 + (f1 - f0) * i / 16, p = at(f); pts.push([p.x, p.y]); } return pts; };
       $('#app').classList.remove('quake');
-      w.surface = 0; w.whirl = 0;
+      await this.tween(2.1, (k) => {
+        if (k < 0.45) {
+          const f = k / 0.45; const h = at(f);
+          w.vis = { x: h.x, y: h.y }; w.surface = 1 - f * 0.75; w.body = body(0, f);
+          w.dir = dir + Math.cos(f * Math.PI) * 0.4 * Math.sign(bend);
+          if (Math.random() < 0.25) fx.dust(h.x + Math.cos(dir) * 20 * sc, h.y + Math.sin(dir) * 20 * sc, 1, '200,150,95', 18 * sc, 6 * sc);
+        } else {
+          const f = (k - 0.45) / 0.55; w.surface = Math.max(0, 0.25 - f * 0.6); w.vis = at(1);
+          w.body = body(f, 1);
+          const tail = at(f); if (Math.random() < 0.25) fx.dust(tail.x, tail.y, 1, '200,150,95', 16 * sc, 6 * sc);
+        }
+        w.whirl = Math.max(0, 1 - k * 2);
+      });
+      fx.sandBurst(w.vis.x, w.vis.y, 20 * sc, 26 * sc, 3);
+      w.surface = 0; w.whirl = 0; w.body = null; w.open = 0;
       fx.decal(end.x, end.y, 30 * sc);
       await this.wait(0.2);
     }
@@ -953,6 +983,16 @@ export class Controller {
   showTerrainInfo(c, r) {
     const g = this.g;
     if (!g.explored[g.i(c, r)]) { this.showPanel(null); return; }
+    const po = g.poiAt(c, r);
+    if (po) {
+      const d = POIS[po.type], own = po.owner >= 0 ? g.players[po.owner] : null;
+      $('#panel').innerHTML = `<div class="p-head"><div><div class="p-name">${d.icon} ${d.name}</div><div class="p-sub" style="color:${own ? own.color : '#cfc4b0'}">${own ? 'Gehalten von ' + own.name : 'Unbesetzt'}</div></div><button class="x" data-a="close">×</button></div>
+        <p class="p-poi">${d.text}</p>
+        <p class="p-poi"><b>Einnehmen:</b> Eine eigene Bodeneinheit auf dem Feld zu Beginn eures Zuges. Der Ort bleibt eurer, bis eine feindliche Einheit ihn besetzt.</p>`;
+      $('#panel').classList.add('show');
+      $('#panel').querySelector('[data-a="close"]')?.addEventListener('click', () => this.showPanel(null));
+      return;
+    }
     const t = TERRAIN[g.terr(c, r)];
     const sp = g.spiceAt(c, r);
     const mc = (mt) => { const v = MOVE_COST[mt][g.terr(c, r)]; return v === Infinity ? '—' : v; };
@@ -1198,6 +1238,7 @@ export class Controller {
     }
     for (const b of g.buildings) if (g.seen(b)) { const p = center(b.c, b.r); ctx.fillStyle = g.players[b.owner].color; ctx.fillRect(p.x * sx - 3, p.y * sy - 3, 6, 6); }
     for (const u of g.units) if (!u.carried && g.seen(u)) { const p = center(u.c, u.r); ctx.fillStyle = g.players[u.owner].color; ctx.beginPath(); ctx.arc(p.x * sx, p.y * sy, 2, 0, 6.28); ctx.fill(); }
+    for (const po of g.pois || []) { const p = center(po.c, po.r); ctx.save(); ctx.translate(p.x * sx, p.y * sy); ctx.rotate(0.785); ctx.fillStyle = po.owner >= 0 ? g.players[po.owner].color : '#e8dcc4'; ctx.strokeStyle = '#111'; ctx.lineWidth = 1; ctx.fillRect(-3.5, -3.5, 7, 7); ctx.strokeRect(-3.5, -3.5, 7, 7); ctx.restore(); }
     for (const w of g.worms) if (g.wormSeen(w)) { const p = center(w.c, w.r); ctx.strokeStyle = '#ffcc66'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p.x * sx, p.y * sy, 3.5, 0, 6.28); ctx.stroke(); }
     const s = g.storm; if (s) { const p = center(s.c, s.r); ctx.fillStyle = 'rgba(200,130,60,0.45)'; ctx.beginPath(); ctx.arc(p.x * sx, p.y * sy, (s.rad + 0.5) * 66 * sx, 0, 6.28); ctx.fill(); }
     const cam = this.r.cam;

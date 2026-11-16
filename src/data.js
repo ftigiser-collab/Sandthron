@@ -128,6 +128,9 @@ export const UNITS = {
              desc: 'Lufttransport für Bodeneinheiten. Im Auto-Modus holt er Ernter von weit entfernten Feldern, bringt sie zur Raffinerie und rettet sie vor Würmern.' },
 };
 
+// Etwas weitere Sicht für alle Einheiten
+for (const u of Object.values(UNITS)) u.sight = (u.sight || 1) + 1;
+
 export const BUILDINGS = {
   bauhof:     { name: 'Bauhof', hp: 300, power: 10, cost: 3000, turns: 0, sight: 3, buildable: false,
                 desc: 'Herz der Basis. Errichtet ein Gebäude pro Runde und bringt 150 Credits Grundeinkommen.' },
@@ -155,10 +158,18 @@ export const BUILDINGS = {
                 desc: 'Luftabwehr, Reichweite 3. Feuert automatisch am Rundenende.' },
 };
 
+// Schlüsselorte auf der Karte: einnehmen, indem eine eigene Bodeneinheit zu Beginn des eigenen Zuges darauf steht
+export const POIS = {
+  zisterne:   { name: 'Alte Zisterne', icon: '💧', text: '+120 Credits pro Runde. Wasser ist auf dieser Welt mehr wert als Glut.' },
+  warte:      { name: 'Sturmwarte', icon: '📡', text: '+40 Credits pro Runde und große Sicht (5 Felder) rund um die Warte.' },
+  schmuggler: { name: 'Schmugglerlager', icon: '📦', text: 'Orbitale Drops 25 % günstiger und alle drei Runden eine Intrigenkarte.' },
+  heiligtum:  { name: 'Felsenheiligtum', icon: '⛰', text: 'Eigene Einheiten auf und neben dem Heiligtum heilen 15 pro Runde. Wer darauf steht, erhält 25 % Deckung.' },
+};
+
 export const WORM_SIZES = {
-  1: { name: 'Sandwurm', steps: 4, sated: 2, weight: 60, scale: 1 },
-  2: { name: 'Großer Wurm', steps: 5, sated: 2, weight: 30, scale: 1.4 },
-  3: { name: 'Uralter Wurm', steps: 6, sated: 3, weight: 10, scale: 1.9 },
+  1: { name: 'Sandwurm', steps: 3, sated: 3, weight: 60, scale: 1 },
+  2: { name: 'Großer Wurm', steps: 4, sated: 3, weight: 30, scale: 1.4 },
+  3: { name: 'Uralter Wurm', steps: 5, sated: 4, weight: 10, scale: 1.9 },
 };
 
 export const DIFFICULTY = {

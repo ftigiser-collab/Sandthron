@@ -831,6 +831,115 @@ export function drawWormMaw(ctx, x, y, t, k, scale = 1) {
   ctx.restore();
 }
 
+// ---------- Wurm von oben ----------
+// Rücken als gerippter Schlauch entlang eines Pfads (Draufsicht), gleitet mit t
+export function drawWormBody(ctx, pts, width, t, scale = 1) {
+  if (pts.length < 2) return;
+  ctx.save(); ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  const n = pts.length;
+  // Breite: am Schwanzende (Index 0) taucht der Leib in den Sand — schmaler
+  const wAt = (i) => width * (0.55 + 0.45 * Math.min(1, i / (n * 0.35)));
+  const seg = (i, w, col) => { ctx.strokeStyle = col; ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(pts[i][0], pts[i][1]); ctx.lineTo(pts[i + 1][0], pts[i + 1][1]); ctx.stroke(); };
+  ctx.save(); ctx.translate(10 * scale, 9 * scale); ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (const p of pts) ctx.lineTo(p[0], p[1]); ctx.strokeStyle = 'rgba(0,0,0,0.28)'; ctx.lineWidth = width * 0.85; ctx.stroke(); ctx.restore();
+  for (const [f, col] of [[1, '#3a2516'], [0.82, '#5e4229'], [0.58, '#8a6646'], [0.32, '#a98460'], [0.1, '#c9a277']]) for (let i = 0; i < n - 1; i++) seg(i, wAt(i) * f, col);
+  // Ringwülste, wandern mit der Bewegung
+  let acc = 0; const step = 10 * scale, off = (t * 40 * scale) % step;
+  for (let i = 0; i < n - 1; i++) {
+    const [x0, y0] = pts[i], [x1, y1] = pts[i + 1], L = Math.hypot(x1 - x0, y1 - y0); if (L < 0.01) continue;
+    const ux = (x1 - x0) / L, uy = (y1 - y0) / L, nx = -uy, ny = ux, hw = wAt(i) * 0.46;
+    for (let d = (step - ((acc + off) % step)) % step; d < L; d += step) {
+      const cx = x0 + ux * d, cy = y0 + uy * d;
+      ctx.strokeStyle = 'rgba(25,14,7,0.32)'; ctx.lineWidth = 2.2 * scale;
+      ctx.beginPath(); ctx.moveTo(cx + nx * hw, cy + ny * hw); ctx.quadraticCurveTo(cx + ux * 3 * scale, cy + uy * 3 * scale, cx - nx * hw, cy - ny * hw); ctx.stroke();
+      ctx.strokeStyle = 'rgba(240,210,165,0.14)'; ctx.lineWidth = 1.4 * scale;
+      ctx.beginPath(); ctx.moveTo(cx + nx * hw * 0.8 - ux * 2.5, cy + ny * hw * 0.8 - uy * 2.5); ctx.quadraticCurveTo(cx, cy, cx - nx * hw * 0.8 - ux * 2.5, cy - ny * hw * 0.8 - uy * 2.5); ctx.stroke();
+    }
+    acc += L;
+  }
+  // Sandwälle, wo der Leib in den Sand eintaucht (beide Enden)
+  // nur Bugwellen: Sand schiebt sich seitlich an den Eintauchstellen auf, Leib bleibt sichtbar
+  for (const [i0, i1] of [[0, 1], [n - 1, n - 2]]) {
+    const [x, y] = pts[i0], [xb, yb] = pts[i1], a = Math.atan2(y - yb, x - xb), w = wAt(Math.min(i0, n - 2));
+    ctx.save(); ctx.translate(x, y); ctx.rotate(a);
+    const g = ctx.createRadialGradient(w * 0.15, 0, w * 0.1, w * 0.15, 0, w * 0.75);
+    g.addColorStop(0, 'rgba(214,170,112,0.9)'); g.addColorStop(1, 'rgba(214,170,112,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(w * 0.15, 0, w * 0.45, w * 0.75, 0, 0, 6.28); ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// Kopf von oben: k = Höhe (0..1, wächst Richtung Kamera), open = Schlund offen (0..1)
+export function drawWormTop(ctx, x, y, t, k, scale = 1, dir = 0, open = 1) {
+  const Rm = 24 * scale * (0.75 + 0.45 * k);
+  ctx.save(); ctx.translate(x, y);
+  // Sandkragen am Austritt
+  const col = ctx.createRadialGradient(0, 0, Rm * 0.6, 0, 0, Rm * 2.2);
+  col.addColorStop(0, `rgba(70,42,20,${0.7 * k})`); col.addColorStop(0.45, `rgba(190,140,86,${0.75 * k})`); col.addColorStop(0.7, `rgba(236,198,140,${0.5 * k})`); col.addColorStop(1, 'rgba(214,170,110,0)');
+  ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, 0, Rm * 2.2, 0, 6.28); ctx.fill();
+  // Schatten: je höher, desto weiter versetzt
+  ctx.fillStyle = `rgba(0,0,0,${0.35 * k})`; ctx.beginPath(); ctx.arc(14 * scale * k, 12 * scale * k, Rm * 1.02, 0, 6.28); ctx.fill();
+  ctx.rotate(dir);
+  // Hautscheibe mit Ringwülsten
+  const skin = ctx.createRadialGradient(-Rm * 0.35, -Rm * 0.35, Rm * 0.1, 0, 0, Rm);
+  skin.addColorStop(0, '#c49a6c'); skin.addColorStop(0.6, '#7e5a3c'); skin.addColorStop(1, '#2e1d12');
+  ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(0, 0, Rm, 0, 6.28); ctx.fill();
+  for (let i = 1; i <= 3; i++) { ctx.strokeStyle = 'rgba(25,14,7,0.2)'; ctx.lineWidth = 1.4 * scale; ctx.beginPath(); ctx.arc(0, 0, Rm * (1 - i * 0.09), 0, 6.28); ctx.stroke(); }
+  // Hautplatten
+  ctx.fillStyle = 'rgba(30,18,10,0.3)';
+  for (let i = 0; i < 18; i++) { const a = i / 18 * 6.28; ctx.save(); ctx.rotate(a); ctx.fillRect(Rm * 0.84, -1.2 * scale, Rm * 0.12, 2.4 * scale); ctx.restore(); }
+  const o = Math.max(0, Math.min(1, open));
+  if (o < 0.05) {
+    // geschlossen: dreifache Naht
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 3; i++) { const a = i * 2.094 + 1.047; ctx.strokeStyle = 'rgba(30,14,8,0.55)'; ctx.lineWidth = 1.6 * scale; ctx.beginPath(); ctx.moveTo(0, 0); ctx.quadraticCurveTo(Math.cos(a + 0.3) * Rm * 0.4, Math.sin(a + 0.3) * Rm * 0.4, Math.cos(a) * Rm * 0.66, Math.sin(a) * Rm * 0.66); ctx.stroke(); }
+    ctx.fillStyle = 'rgba(255,225,180,0.18)'; ctx.beginPath(); ctx.arc(-Rm * 0.25, -Rm * 0.25, Rm * 0.35, 0, 6.28); ctx.fill();
+  } else {
+    // drei Lippen klappen nach außen und liegen über dem Kragen
+    for (let i = 0; i < 3; i++) {
+      const a = i * 2.094 + 1.047 + Math.sin(t * 1.3 + i * 2) * 0.05;
+      ctx.save(); ctx.rotate(a);
+      const L = Rm * (0.45 + 0.75 * o), Wd = Rm * 0.9;
+      ctx.translate(Rm * 0.3 * o, 0);
+      const outer = ctx.createLinearGradient(0, 0, L, 0); outer.addColorStop(0, '#4a2e1a'); outer.addColorStop(1, '#a8845c');
+      const lip = (dx, dy, sc2) => { ctx.beginPath(); ctx.moveTo(dx, -Wd * sc2 + dy); ctx.bezierCurveTo(L * 0.7 + dx, -Wd * 0.95 * sc2 + dy, L * 1.12 + dx, -Wd * 0.45 * sc2 + dy, L + dx, dy); ctx.bezierCurveTo(L * 1.12 + dx, Wd * 0.45 * sc2 + dy, L * 0.7 + dx, Wd * 0.95 * sc2 + dy, dx, Wd * sc2 + dy); ctx.closePath(); };
+      ctx.fillStyle = 'rgba(0,0,0,0.3)'; lip(3, 3, 1); ctx.fill();
+      ctx.fillStyle = outer; lip(0, 0, 1); ctx.fill();
+      const inner = ctx.createLinearGradient(0, 0, L, 0); inner.addColorStop(0, '#3a0e08'); inner.addColorStop(0.55, '#8e3a26'); inner.addColorStop(1, '#c8765a');
+      ctx.fillStyle = inner; ctx.save(); ctx.scale(0.9, 1); lip(0, 0, 0.74); ctx.restore(); ctx.fill();
+      ctx.strokeStyle = 'rgba(40,10,6,0.45)'; ctx.lineWidth = 0.9 * scale;
+      for (let j = -2; j <= 2; j++) { ctx.beginPath(); ctx.moveTo(2, j * Wd * 0.22); ctx.quadraticCurveTo(L * 0.5, j * Wd * 0.18, L * 0.8, j * Wd * 0.04); ctx.stroke(); }
+      for (let j = -4; j <= 4; j++) {
+        const ty = j * Wd * 0.15, tx = L * (0.3 + (1 - Math.abs(j) / 4) * 0.42);
+        ctx.fillStyle = 'rgba(226,210,176,0.85)'; ctx.beginPath(); ctx.moveTo(tx, ty - 1 * scale); ctx.lineTo(tx - 3.5 * scale * o, ty); ctx.lineTo(tx, ty + 1 * scale); ctx.fill();
+      }
+      ctx.restore();
+    }
+    // Schlundöffnung mit Zahnringen, die nach innen kleiner und dunkler werden
+    const hole = Rm * 0.72 * o;
+    for (let ring = 0; ring < 5; ring++) {
+      const rr = hole * (1 - ring * 0.17), n = 26 - ring * 4, dk = 1 - ring * 0.18;
+      const thr = ctx.createRadialGradient(0, 0, 0, 0, 0, rr);
+      thr.addColorStop(0, '#040100'); thr.addColorStop(0.7, `rgb(${60 * dk | 0},${22 * dk | 0},${12 * dk | 0})`); thr.addColorStop(1, `rgb(${110 * dk | 0},${50 * dk | 0},${30 * dk | 0})`);
+      ctx.fillStyle = thr; ctx.beginPath(); ctx.arc(0, 0, rr, 0, 6.28); ctx.fill();
+      const spin = t * (ring % 2 ? 0.6 : -0.45);
+      ctx.fillStyle = `rgb(${236 * dk | 0},${222 * dk | 0},${192 * dk | 0})`;
+      for (let i = 0; i < n; i++) {
+        const a = i / n * 6.28 + spin, len = (6.5 - ring) * scale * o;
+        ctx.beginPath(); ctx.moveTo(Math.cos(a - 0.09) * rr, Math.sin(a - 0.09) * rr); ctx.lineTo(Math.cos(a) * (rr - len), Math.sin(a) * (rr - len)); ctx.lineTo(Math.cos(a + 0.09) * rr, Math.sin(a + 0.09) * rr); ctx.fill();
+      }
+    }
+    ctx.globalCompositeOperation = 'lighter';
+    const gl = ctx.createRadialGradient(0, 0, 0, 0, 0, hole * 0.45); gl.addColorStop(0, `rgba(255,130,50,${0.55 * o})`); gl.addColorStop(1, 'rgba(255,110,40,0)');
+    ctx.fillStyle = gl; ctx.beginPath(); ctx.arc(0, 0, hole * 0.45, 0, 6.28); ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  // Sand rieselt vom Rand nach außen
+  ctx.fillStyle = `rgba(232,192,135,${0.75 * k})`;
+  for (let i = 0; i < 20; i++) { const a = i * 0.314 + t * 0.2, ph = ((t * 0.9 + i * 0.13) % 1); const rr = Rm * (1 + ph * 0.6); ctx.fillRect(Math.cos(a) * rr - 1, Math.sin(a) * rr - 1, 2.2 * scale * (1 - ph), 2.2 * scale * (1 - ph)); }
+  ctx.restore();
+}
+
 // ---------- Kachel-Icons für das Menü ----------
 const iconCache = new Map();
 const iconBg = {};
@@ -1013,7 +1122,7 @@ export function cardArt(id) {
 
 // Sandtrichter: der Boden sackt ein, Sand strömt spiralförmig zur Mitte
 export function drawSandWhirl(ctx, x, y, t, k, scale = 1) {
-  ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale * 0.8);
+  ctx.save(); ctx.translate(x, y); ctx.scale(scale, scale);
   const R = 52 * k;
   const g = ctx.createRadialGradient(0, 0, 2, 0, 0, R);
   g.addColorStop(0, `rgba(40,24,12,${0.75 * k})`); g.addColorStop(0.6, `rgba(110,70,35,${0.45 * k})`); g.addColorStop(1, 'rgba(170,120,70,0)');

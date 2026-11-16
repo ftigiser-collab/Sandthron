@@ -15,7 +15,7 @@ export function dangerFn(g, owner) {
   return (c, r) => {
     let d = 0;
     if (g.stormNext(c, r)) d += 8;
-    if (g.isSand(c, r)) for (const w of g.worms) if (knows(w) && distance(c, r, w.c, w.r) <= 4) d += 5 - distance(c, r, w.c, w.r);
+    if (g.isSand(c, r)) for (const w of g.worms) if (knows(w)) { const dd = distance(c, r, w.c, w.r); if (dd <= 4) d += 5 - dd; if (w.lock && dd <= 6) d += 4; }
     return d;
   };
 }
@@ -177,7 +177,8 @@ export async function aiTurn(g, act, owner = 1) {
       const ts = g.voiceTargets(u).sort((a, b) => value(g, b) - value(g, a));
       if (ts.length && value(g, ts[0]) >= 300) { await act.voice(u, ts[0]); continue; }
     }
-    await unitAct(g, u, act, mode, { threats, enemyB, enemyU, stage, home });
+    const ck = g.round + '-' + owner; if (g._poiCk !== ck) { g._poiCk = ck; g._poiClaims = new Set(); }
+    await unitAct(g, u, act, mode, { threats, enemyB, enemyU, stage, home, poiClaims: g._poiClaims });
   }
   for (const u of mine) if (u.def.carrier && !u.dead) await autoCarry(g, u, act);
   for (const u of mine) if (u.def.harvester && !u.dead) await autoHarvest(g, u, act);
@@ -223,9 +224,20 @@ async function unitAct(g, u, act, mode, ctx) {
     if (!u.dead && !best.t.dead) await act.attack(u, best.t);
     return;
   }
+  // Schlüsselorte: halten bzw. einnehmen
+  let poiGoal = null;
+  if (!g.isAir(u) && !u.def.harvester && !u.def.carrier && g.pois) {
+    const here = g.poiAt(u.c, u.r);
+    if (here && (here.owner !== u.owner || (ctx.threats || []).some((t) => !t.dead && distance(t.c, t.r, u.c, u.r) <= 4))) return;
+    ctx.poiClaims = ctx.poiClaims || new Set();
+    const cand = g.pois.filter((p) => p.owner !== u.owner && !ctx.poiClaims.has(p) && !g.units.some((x) => !x.dead && x.owner === u.owner && x.c === p.c && x.r === p.r) && distance(u.c, u.r, p.c, p.r) <= 10);
+    const pt = nearest(u, cand);
+    if (pt && (mode !== 'attack' || distance(u.c, u.r, pt.c, pt.r) <= 4)) { ctx.poiClaims.add(pt); poiGoal = pt; }
+  }
   // Ziel bestimmen
-  let goal = null;
-  if (mode === 'defend' && ctx.threats.length) goal = nearest(u, ctx.threats.filter((t) => !t.dead));
+  let goal = poiGoal;
+  if (goal) { /* Schlüsselort */ }
+  else if (mode === 'defend' && ctx.threats.length) goal = nearest(u, ctx.threats.filter((t) => !t.dead));
   else if (mode === 'attack') goal = nearest(u, ctx.enemyB.filter((b) => !b.dead)) || nearest(u, ctx.enemyU.filter((t) => !t.dead));
   else if (ctx.stage) goal = ctx.stage;
   if (!goal) return;

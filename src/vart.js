@@ -172,107 +172,187 @@ const ernterBody = (color) => part(`vh-ernter-${color}`, 44, 34, (L) => {
   L((c) => { c.fillStyle = lg(c, 13, -13, 19, 13, '#5a544c', '#24211d'); rr(c, 13, -13, 6, 26, 2); c.fill(); rivetRow(c, 16, -11.5, 16, 11.5, 8, 0.4); }, { bevel: 0.6 });
 });
 
-// ---------- Thopter ----------
-function wings(c, x, y, len, wid, a, flap, alpha = 1, bank = 0) {
-  for (const s of [-1, 1]) {
-    c.save(); c.translate(x, y); c.rotate(s * a);
-    const Lw = len * flap * (1 - s * bank * 0.35);
-    const g = c.createLinearGradient(0, 0, 0, s * Lw);
-    g.addColorStop(0, `rgba(215,228,236,${0.9 * alpha})`); g.addColorStop(0.7, `rgba(180,198,210,${0.5 * alpha})`); g.addColorStop(1, `rgba(170,190,205,${0.25 * alpha})`);
-    c.fillStyle = g;
-    c.beginPath(); c.moveTo(-wid * 0.3, 0); c.quadraticCurveTo(-wid, s * Lw * 0.6, -wid * 0.2, s * Lw); c.quadraticCurveTo(wid * 0.6, s * Lw * 0.7, wid * 0.4, 0); c.closePath(); c.fill();
-    c.strokeStyle = `rgba(55,62,70,${0.55 * alpha})`; c.lineWidth = 0.7;
-    c.beginPath(); c.moveTo(0, 0); c.lineTo(-wid * 0.15, s * Lw * 0.95); c.stroke();
-    c.lineWidth = 0.35; for (let k = 0.3; k < 0.95; k += 0.22) { c.beginPath(); c.moveTo(-wid * 0.12 * k, s * Lw * k); c.lineTo(-wid * 0.6, s * Lw * (k + 0.1)); c.moveTo(-wid * 0.12 * k, s * Lw * k); c.lineTo(wid * 0.35, s * Lw * (k + 0.06)); c.stroke(); }
-    c.restore();
+// ---------- Thopter (Filmstil: kantiger Rumpf, facettierte Kanzel, Heckausleger, je Seite zwei Flügelsätze) ----------
+const HULL_L = '#d9cfbb', HULL_M = '#9a907c', HULL_D = '#4a443a';
+
+// facettierte Glaskanzel, Nase zeigt nach +x
+function canopy(c, x, len, wid) {
+  const pts = [[x + len, 0], [x + len * 0.72, -wid * 0.55], [x + len * 0.3, -wid * 0.62], [x, -wid * 0.5], [x, wid * 0.5], [x + len * 0.3, wid * 0.62], [x + len * 0.72, wid * 0.55]];
+  c.fillStyle = '#2a2f33'; c.beginPath(); pts.forEach(([px, py], i) => i ? c.lineTo(px, py) : c.moveTo(px, py)); c.closePath(); c.fill();
+  // Glasfacetten in zwei Tönen, Rahmen dazwischen
+  const panes = [
+    [[x + len * 0.95, 0], [x + len * 0.7, -wid * 0.48], [x + len * 0.5, -wid * 0.22], [x + len * 0.55, 0]],
+    [[x + len * 0.95, 0], [x + len * 0.7, wid * 0.48], [x + len * 0.5, wid * 0.22], [x + len * 0.55, 0]],
+    [[x + len * 0.66, -wid * 0.52], [x + len * 0.32, -wid * 0.56], [x + len * 0.22, -wid * 0.18], [x + len * 0.47, -wid * 0.18]],
+    [[x + len * 0.66, wid * 0.52], [x + len * 0.32, wid * 0.56], [x + len * 0.22, wid * 0.18], [x + len * 0.47, wid * 0.18]],
+    [[x + len * 0.5, -wid * 0.14], [x + len * 0.2, -wid * 0.14], [x + len * 0.2, wid * 0.14], [x + len * 0.5, wid * 0.14]],
+  ];
+  panes.forEach((pp, i) => {
+    const g = c.createLinearGradient(x, -wid, x + len, wid); g.addColorStop(0, i % 2 ? '#bfe6f6' : '#7fb8d4'); g.addColorStop(1, i % 2 ? '#4f7f96' : '#2f566a');
+    c.fillStyle = g; c.beginPath(); pp.forEach(([px, py], j) => j ? c.lineTo(px, py) : c.moveTo(px, py)); c.closePath(); c.fill();
+  });
+  c.fillStyle = 'rgba(255,255,255,0.55)'; c.beginPath(); c.moveTo(x + len * 0.86, -wid * 0.08); c.lineTo(x + len * 0.66, -wid * 0.36); c.lineTo(x + len * 0.62, -wid * 0.28); c.closePath(); c.fill();
+}
+// eckiger Rumpfabschnitt (sechseckiger Querschnitt von oben: Mittelgrat + Flanken)
+function hullBlock(c, x0, x1, w0, w1, light = HULL_L, dark = HULL_D) {
+  c.fillStyle = dark; c.beginPath(); c.moveTo(x0, -w0); c.lineTo(x1, -w1); c.lineTo(x1, w1); c.lineTo(x0, w0); c.closePath(); c.fill();
+  c.fillStyle = lg(c, 0, -w0, 0, 0, light, HULL_M); c.beginPath(); c.moveTo(x0, -w0 * 0.92); c.lineTo(x1, -w1 * 0.92); c.lineTo(x1, 0); c.lineTo(x0, 0); c.closePath(); c.fill();
+  c.fillStyle = lg(c, 0, 0, 0, w0, HULL_M, '#6e6656'); c.beginPath(); c.moveTo(x0, 0); c.lineTo(x1, 0); c.lineTo(x1, w1 * 0.92); c.lineTo(x0, w0 * 0.92); c.closePath(); c.fill();
+  c.strokeStyle = 'rgba(255,248,230,0.45)'; c.lineWidth = 0.4; c.beginPath(); c.moveTo(x0, -0.2); c.lineTo(x1, -0.2); c.stroke();
+}
+// segmentierter Heckausleger
+function tailBoom(c, x0, len, w, color, fins = true) {
+  const n = 5;
+  for (let i = 0; i < n; i++) {
+    const a = x0 - len * i / n, b = x0 - len * (i + 1) / n + 0.6, ww = w * (1 - i * 0.12);
+    hullBlock(c, b, a, ww * 0.88, ww);
+    c.fillStyle = 'rgba(30,24,18,0.6)'; c.fillRect(b - 0.2, -ww * 0.9, 0.6, ww * 1.8);
+  }
+  const e = x0 - len;
+  if (fins) { c.fillStyle = HULL_D; c.beginPath(); c.moveTo(e + 3, -0.8); c.lineTo(e - 1, -w * 2.2); c.lineTo(e - 2.5, -w * 2); c.lineTo(e - 1, -0.8); c.closePath(); c.fill(); c.beginPath(); c.moveTo(e + 3, 0.8); c.lineTo(e - 1, w * 2.2); c.lineTo(e - 2.5, w * 2); c.lineTo(e - 1, 0.8); c.closePath(); c.fill(); }
+  c.fillStyle = color; c.fillRect(e + len * 0.25, -w * 0.5, len * 0.18, w);
+}
+// Flügelwurzel-Gehäuse mit Antrieb
+function wingRoot(c, x, w, len = 6) {
+  for (const sy of [-1, 1]) {
+    c.fillStyle = lg(c, x - len / 2, 0, x + len / 2, 0, '#5c564c', '#2a2622'); c.beginPath();
+    c.moveTo(x - len / 2, sy * w * 0.8); c.lineTo(x + len / 2, sy * w * 0.8); c.lineTo(x + len * 0.35, sy * (w + 2.6)); c.lineTo(x - len * 0.35, sy * (w + 2.6)); c.closePath(); c.fill();
+    c.fillStyle = '#8a8476'; c.beginPath(); c.arc(x, sy * (w + 1.4), 1.1, 0, 6.28); c.fill();
   }
 }
 
 const THOPTER = {
-  libelle: { size: [36, 16], body(c, color) {
-    c.fillStyle = lg(c, 0, -5, 0, 5, '#ece4d2', '#7a7262'); c.beginPath(); c.moveTo(15, 0); c.quadraticCurveTo(9, -5, -2, -4.2); c.lineTo(-14, -1.5); c.lineTo(-17, 0); c.lineTo(-14, 1.5); c.lineTo(-2, 4.2); c.quadraticCurveTo(9, 5, 15, 0); c.fill();
-    seams(c, [[-2, -4.2, -2, 4.2], [-9, -2.5, -9, 2.5]]);
-    c.fillStyle = color; c.fillRect(-13, -1.5, 6, 3);
-    c.fillStyle = GLASS; c.beginPath(); c.ellipse(8, 0, 4.4, 3.2, 0, 0, 6.28); c.fill();
-    c.fillStyle = 'rgba(255,255,255,0.65)'; c.beginPath(); c.ellipse(9, -1, 1.7, 1, 0, 0, 6.28); c.fill();
-    c.strokeStyle = '#22252a'; c.lineWidth = 1.3; c.beginPath(); c.moveTo(13, 2.6); c.lineTo(19, 2.6); c.stroke();
-    rivets(c, [[2, -3], [2, 3], [-6, -2.2], [-6, 2.2]], 0.35);
+  // Späher: schlank, ein Flügelsatz je Seite vorn und hinten (4 Flügel)
+  libelle: { size: [52, 18], wings: [[3, 1, 18, 4.2], [-4, 1, 16, 3.8]], rootW: 3.2, rate: 22, scale: 0.92, body(c, color) {
+    tailBoom(c, -6, 17, 2, color);
+    hullBlock(c, -7, 8, 3.2, 3.6); wingRoot(c, 3, 3.2, 4.5); wingRoot(c, -4, 3.2, 4.5);
+    canopy(c, 7, 11, 7.4);
+    c.strokeStyle = '#22252a'; c.lineWidth = 0.9; c.beginPath(); c.moveTo(16, 2.4); c.lineTo(21, 2.4); c.stroke();
+    rivets(c, [[-5, -2.4], [-5, 2.4], [1, -2.6], [1, 2.6]], 0.3);
   } },
-  falke: { size: [38, 20], body(c, color) {
-    c.fillStyle = lg(c, 0, -5, 0, 5, '#e2d8c2', '#6e6656'); c.beginPath(); c.moveTo(16, 0); c.quadraticCurveTo(10, -5.5, -2, -4.6); c.lineTo(-15, -1.8); c.lineTo(-18, 0); c.lineTo(-15, 1.8); c.lineTo(-2, 4.6); c.quadraticCurveTo(10, 5.5, 16, 0); c.fill();
-    for (const yy of [-8.2, 5.2]) { c.fillStyle = lg(c, 0, yy, 0, yy + 3, '#4a4640', '#1e1c19'); rr(c, -3, yy, 11, 3, 1.2); c.fill(); for (let k = 0; k < 3; k++) { c.fillStyle = '#c84a30'; c.beginPath(); c.arc(7.6, yy + 0.8 + k * 0.7, 0.35, 0, 6.28); c.fill(); } }
-    c.fillStyle = color; c.fillRect(-14, -1.8, 6, 3.6); seams(c, [[-2, -4.6, -2, 4.6]]);
-    c.fillStyle = GLASS; c.beginPath(); c.ellipse(9, 0, 4.6, 3.4, 0, 0, 6.28); c.fill();
-    c.fillStyle = 'rgba(255,255,255,0.65)'; c.beginPath(); c.ellipse(10, -1, 1.8, 1, 0, 0, 6.28); c.fill();
-    rivets(c, [[2, -3.4], [2, 3.4], [-7, -2.4], [-7, 2.4]], 0.35);
+  // Kampf-Thopter: klassischer Achtflügler mit Raketenbehältern
+  falke: { size: [58, 24], wings: [[4, 2, 21, 4.6], [-5, 2, 19, 4.4]], rootW: 4, rate: 19, scale: 1, body(c, color) {
+    tailBoom(c, -8, 19, 2.4, color);
+    hullBlock(c, -9, 9, 4, 4.6); wingRoot(c, 4, 4, 5.5); wingRoot(c, -5, 4, 5.5);
+    for (const sy of [-1, 1]) { c.fillStyle = lg(c, 0, sy * 7.5, 0, sy * 10, '#4a4640', '#1e1c19'); rr(c, -2, sy > 0 ? 7 : -10, 10, 3, 1); c.fill(); c.fillStyle = '#c84a30'; for (let k = 0; k < 3; k++) { c.beginPath(); c.arc(7.6, (sy > 0 ? 7.6 : -9.4) + k * 0.8, 0.35, 0, 6.28); c.fill(); } }
+    canopy(c, 8, 12, 9);
+    seams(c, [[-1, -4.4, -1, 4.4], [-6, -4.1, -6, 4.1]]);
+    c.fillStyle = color; c.fillRect(-8, -1, 5, 2);
+    rivets(c, [[-3, -3.2], [-3, 3.2], [6, -3.6], [6, 3.6]], 0.3);
   } },
-  bomber: { size: [40, 22], body(c, color) {
-    c.fillStyle = lg(c, 0, -7, 0, 7, '#cfc3aa', '#5a5244'); c.beginPath(); c.moveTo(16, 0); c.quadraticCurveTo(13, -7.5, 0, -7.5); c.lineTo(-15, -4.5); c.lineTo(-18, 0); c.lineTo(-15, 4.5); c.lineTo(0, 7.5); c.quadraticCurveTo(13, 7.5, 16, 0); c.fill();
-    c.fillStyle = '#23201b'; rr(c, -10, -3.8, 13, 7.6, 2); c.fill();
-    seams(c, [[3, -7, 3, 7], [-10, 0, 3, 0]]); c.fillStyle = color; c.fillRect(-15, -3, 4, 6);
-    c.fillStyle = GLASS; c.beginPath(); c.ellipse(10, 0, 4.4, 4.2, 0, 0, 6.28); c.fill();
-    rivetRow(c, -12, -5.5, 8, -5.5, 8, 0.35); rivetRow(c, -12, 5.5, 8, 5.5, 8, 0.35);
+  // Abfangjäger: pfeilförmige Nase, kurze gepfeilte Flügel
+  jaeger: { size: [56, 22], wings: [[3, 1.6, 17, 3.8, 0.15], [-5, 1.6, 15, 3.6, 0.6]], rootW: 3.4, rate: 26, scale: 0.98, body(c, color) {
+    tailBoom(c, -8, 18, 2, color);
+    hullBlock(c, -9, 8, 3.4, 4.2); wingRoot(c, 3, 3.4, 4.5); wingRoot(c, -5, 3.4, 4.5);
+    c.fillStyle = HULL_D; c.beginPath(); c.moveTo(8, -4.2); c.lineTo(24, 0); c.lineTo(8, 4.2); c.closePath(); c.fill();
+    canopy(c, 8, 13, 6.8);
+    for (const sy of [-1, 1]) { c.fillStyle = '#ecebe6'; c.fillRect(-2, sy * 6.6 - 0.8, 9, 1.6); c.fillStyle = '#d24a30'; c.fillRect(6.4, sy * 6.6 - 0.8, 1.6, 1.6); }
+    c.fillStyle = color; c.fillRect(-8, -0.8, 6, 1.6);
   } },
-  jaeger: { size: [38, 16], body(c, color) {
-    c.fillStyle = lg(c, 0, -4, 0, 4, '#efe6d2', '#7a7262'); c.beginPath(); c.moveTo(18, 0); c.lineTo(2, -3.8); c.lineTo(-13, -2.2); c.lineTo(-16, -5.5); c.lineTo(-18, 0); c.lineTo(-16, 5.5); c.lineTo(-13, 2.2); c.lineTo(2, 3.8); c.closePath(); c.fill();
-    c.fillStyle = color; c.fillRect(-12, -1, 18, 2);
-    c.fillStyle = '#ecebe6'; c.fillRect(-2, -7.4, 10, 1.6); c.fillRect(-2, 5.8, 10, 1.6); c.fillStyle = '#d24a30'; c.fillRect(7.4, -7.4, 1.6, 1.6); c.fillRect(7.4, 5.8, 1.6, 1.6);
-    c.fillStyle = GLASS; c.beginPath(); c.ellipse(9.5, 0, 3.8, 2.6, 0, 0, 6.28); c.fill();
+  // Bomber: Doppelrumpf mit mittiger Kanzelgondel und Bombenschacht
+  bomber: { size: [60, 30], wings: [[5, 8, 20, 5], [-6, 8, 19, 4.8]], rootW: 8, rate: 13, scale: 1.12, body(c, color) {
+    for (const sy of [-1, 1]) { c.save(); c.translate(0, sy * 7); tailBoom(c, -6, 20, 2.2, color, false); hullBlock(c, -8, 12, 2.8, 2.6); c.restore(); }
+    c.fillStyle = HULL_D; c.fillRect(-12, -9.2, 3, 18.4);
+    hullBlock(c, -8, 6, 5.5, 6); c.fillStyle = '#1e1b17'; rr(c, -6, -3.4, 10, 6.8, 1.5); c.fill(); hazard(c, -6, -3.4, 10, 1.2);
+    wingRoot(c, 5, 8.6, 5); wingRoot(c, -6, 8.6, 5);
+    canopy(c, 6, 11, 9.6);
+    c.fillStyle = color; c.fillRect(-11.6, -6, 2.2, 12);
   } },
-  traeger: { size: [36, 22], body(c, color) {
-    c.fillStyle = lg(c, 0, -6, 0, 6, '#d6ccb4', '#5e5648'); rr(c, -14, -5.5, 27, 11, 3); c.fill();
-    c.strokeStyle = '#2a2622'; c.lineWidth = 2.2; c.beginPath(); c.moveTo(-9, -9); c.lineTo(-9, 9); c.moveTo(7, -9); c.lineTo(7, 9); c.stroke();
-    c.fillStyle = '#4a443c'; for (const [x, y] of [[-9, -9], [-9, 9], [7, -9], [7, 9]]) { c.beginPath(); c.arc(x, y, 1.4, 0, 6.28); c.fill(); }
-    c.fillStyle = color; c.fillRect(-14, -5.5, 3, 11); hazard(c, -3, -5.5, 4, 2);
-    c.fillStyle = GLASS; c.beginPath(); c.ellipse(11, 0, 4, 3.6, 0, 0, 6.28); c.fill();
-    rivetRow(c, -11, -4.4, 9, -4.4, 8, 0.35); rivetRow(c, -11, 4.4, 9, 4.4, 8, 0.35);
+  // Sturmadler: schwer gepanzerter Kanonen-Thopter
+  adler: { size: [62, 28], wings: [[5, 3, 22, 5.2], [-6, 3, 21, 5]], rootW: 5, rate: 15, scale: 1.12, body(c, color) {
+    tailBoom(c, -9, 18, 3, color);
+    hullBlock(c, -10, 10, 5, 5.8); wingRoot(c, 5, 5, 6); wingRoot(c, -6, 5, 6);
+    for (const sy of [-1, 1]) { c.fillStyle = lg(c, 0, sy * 8, 0, sy * 11, '#4a4640', '#1e1c19'); rr(c, -4, sy > 0 ? 8 : -11, 12, 3, 1); c.fill(); c.fillStyle = '#d24a30'; c.fillRect(7, sy > 0 ? 8.5 : -10.5, 1.6, 2); }
+    canopy(c, 9, 12, 10);
+    c.strokeStyle = '#1e2024'; c.lineWidth = 1.6; c.beginPath(); c.moveTo(20, 0); c.lineTo(27, 0); c.stroke();
+    c.fillStyle = '#2a2d31'; c.beginPath(); c.arc(20, 0, 2, 0, 6.28); c.fill();
+    seams(c, [[0, -5.3, 0, 5.3], [-5, -5.1, -5, 5.1]]); rivetRow(c, -8, -4.6, 8, -5.2, 7, 0.3); rivetRow(c, -8, 4.6, 8, 5.2, 7, 0.3);
+    c.fillStyle = color; c.fillRect(-9, -1.4, 6, 2.8);
   } },
-  adler: { size: [42, 24], body(c, color) {
-    c.fillStyle = lg(c, 0, -7, 0, 7, '#f0e6d0', '#5a5244'); c.beginPath(); c.moveTo(18, 0); c.lineTo(8, -6); c.lineTo(-12, -5); c.lineTo(-18, -2); c.lineTo(-18, 2); c.lineTo(-12, 5); c.lineTo(8, 6); c.closePath(); c.fill();
-    for (const yy of [-10, 6.6]) { c.fillStyle = lg(c, 0, yy, 0, yy + 3.4, '#4a4640', '#1e1c19'); rr(c, -4, yy, 12, 3.4, 1.2); c.fill(); c.fillStyle = '#d24a30'; c.fillRect(7, yy + 0.4, 2, 2.6); }
-    c.fillStyle = color; c.fillRect(-17, -2, 6, 4); c.fillRect(-6, -6, 2, 12);
-    seams(c, [[0, -5.6, 0, 5.6], [-12, 0, -6, 0]]);
-    c.fillStyle = GLASS; c.beginPath(); c.ellipse(11, 0, 4.6, 3.4, 0, 0, 6.28); c.fill();
-    c.fillStyle = 'rgba(255,255,255,0.65)'; c.beginPath(); c.ellipse(12, -1, 1.8, 1, 0, 0, 6.28); c.fill();
-    rivetRow(c, -14, -3.5, 6, -4.6, 8, 0.35); rivetRow(c, -14, 3.5, 6, 4.6, 8, 0.35);
+  // Träger: langer Rahmen mit Lastklammern, große Flügel
+  traeger: { size: [62, 28], wings: [[6, 4.5, 22, 5], [-7, 4.5, 21, 5]], rootW: 4.5, rate: 13, scale: 1.12, body(c, color) {
+    tailBoom(c, -11, 15, 2.6, color);
+    c.fillStyle = HULL_D; c.fillRect(-12, -4.5, 24, 9);
+    hullBlock(c, -12, 12, 3.6, 4.2);
+    c.strokeStyle = '#2a2622'; c.lineWidth = 1.8;
+    for (const x of [-8, 7]) { c.beginPath(); c.moveTo(x, -10); c.lineTo(x, 10); c.stroke(); c.fillStyle = '#d9a33a'; c.fillRect(x - 1.2, -10.5, 2.4, 2); c.fillRect(x - 1.2, 8.5, 2.4, 2); }
+    wingRoot(c, 6, 4.5, 5); wingRoot(c, -7, 4.5, 5);
+    hazard(c, -3, -3.6, 5, 1.4);
+    canopy(c, 11, 10, 8);
+    c.fillStyle = color; c.fillRect(-11, -1.2, 4, 2.4);
   } },
 };
-const WINGS = {
-  libelle: [[-6, 13, 6, 0.25], [2, 16, 7, -0.15]], falke: [[-6, 13, 6, 0.25], [2, 17, 7, -0.15]],
-  bomber: [[-7, 15, 7, 0.25], [2, 19, 7.5, -0.15]], jaeger: [[-6, 12, 5, 0.3], [2, 14, 5, -0.5]],
-  traeger: [[-7, 15, 6, 0.25], [3, 17, 7, -0.15]], adler: [[-7, 15, 7, 0.25], [2, 19, 7.5, -0.15]],
-};
+
+// eckiger Libellenflügel: wurzelt bei (0,0), zeigt in Richtung +y*side, f = Verkürzung durch den Flügelschlag
+function angWing(c, side, len, chord, f, sweep, alpha) {
+  const L = len * f;
+  c.save(); c.rotate(side * sweep);
+  const P = [[-chord * 0.42, 0], [-chord * 0.5, side * L * 0.82], [-chord * 0.18, side * L], [chord * 0.32, side * L * 0.9], [chord * 0.45, side * L * 0.2], [chord * 0.4, 0]];
+  const g = c.createLinearGradient(0, 0, 0, side * L);
+  g.addColorStop(0, `rgba(196,206,212,${0.85 * alpha})`); g.addColorStop(0.6, `rgba(170,184,192,${0.55 * alpha})`); g.addColorStop(1, `rgba(150,166,176,${0.35 * alpha})`);
+  c.fillStyle = g; c.beginPath(); P.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); c.fill();
+  // Rahmen: kräftige Vorderkante, Längsholm, Querrippen
+  c.strokeStyle = `rgba(40,44,50,${0.85 * alpha})`; c.lineWidth = 0.9;
+  c.beginPath(); c.moveTo(P[0][0], P[0][1]); c.lineTo(P[1][0], P[1][1]); c.lineTo(P[2][0], P[2][1]); c.stroke();
+  c.lineWidth = 0.4; c.strokeStyle = `rgba(60,66,72,${0.4 * alpha})`;
+  c.beginPath(); c.moveTo(0, 0); c.lineTo(-chord * 0.05, side * L * 0.94);
+  for (let k = 1; k <= 2; k++) { const fy = k / 3; c.moveTo(-chord * (0.42 + 0.08 * fy), side * L * fy * 0.82); c.lineTo(chord * (0.4 - 0.05 * fy), side * L * fy * 0.86); }
+  c.stroke();
+  c.restore();
+}
 
 function thopterArt(ctx, u, color, t, o, kind) {
   const def = THOPTER[kind];
-  const p = part(`th-${kind}-${color}`, def.size[0], def.size[1], (L) => L((c) => def.body(c, color), { bevel: 0.6, grime: 0.35 }));
-  const z = o.z ?? 26;
-  const rate = kind === 'traeger' || kind === 'bomber' ? 12 : kind === 'jaeger' ? 24 : 19;
-  const ph = t * rate + u.id;
-  const fa = 0.55 + 0.45 * Math.abs(Math.sin(ph)), fb = 0.55 + 0.45 * Math.abs(Math.sin(ph + 1.3));
-  const big = kind === 'traeger' ? 1.25 : kind === 'bomber' || kind === 'adler' ? 1.3 : kind === 'falke' ? 1.1 : kind === 'jaeger' ? 1.0 : 0.95;
-  const bank = o.bank || 0;
-  const [w1, w2] = WINGS[kind];
+  const p = part(`th2-${kind}-${color}`, def.size[0], def.size[1], (L) => L((c) => def.body(c, color), { bevel: 0.5, grime: 0.35 }));
+  const z = o.z ?? 26, sc = def.scale, bank = o.bank || 0;
+  const ph = t * def.rate + u.id;
+  // vorderer und hinterer Satz schlagen gegenläufig, innerer und äußerer Flügel leicht versetzt
+  const fl = (off) => 0.3 + 0.7 * Math.abs(Math.cos(ph + off));
+  const drawWings = (alpha, shadow) => {
+    def.wings.forEach(([x, rootY, len, chord, sw0], si) => {
+      const sw = sw0 ?? (si ? 0.42 : -0.1);
+      const off = si ? Math.PI / 2 : 0;
+      for (const side of [-1, 1]) {
+        const lean = 1 - side * bank * 0.3;
+        for (const [k, dAng, la] of [[0, -0.16, 1], [0.6, 0.14, 0.92]]) {
+          c2(ctx, () => { ctx.translate(x, side * rootY); angWing(ctx, side, len * la * lean, chord, fl(off + k), sw + dAng * side * side, shadow ? 1 : alpha); });
+        }
+        if (!shadow) { // Bewegungsunschärfe als Fächer
+          ctx.save(); ctx.translate(x, side * rootY); ctx.fillStyle = `rgba(200,215,225,${0.07 * alpha})`;
+          ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, len * lean, side > 0 ? 1.2 - sw : -1.95 + sw, side > 0 ? 1.95 - sw : -1.2 + sw); ctx.closePath(); ctx.fill(); ctx.restore();
+        }
+      }
+    });
+  };
   // Bodenschatten
-  ctx.save(); ctx.translate(z * 0.35, z * 0.45); ctx.rotate(u.facing); ctx.scale(big, big);
-  ctx.globalAlpha *= Math.max(0.1, 0.32 - z * 0.003);
+  ctx.save(); ctx.translate(z * 0.35, z * 0.45); ctx.rotate(u.facing); ctx.scale(sc, sc);
+  ctx.globalAlpha *= Math.max(0.1, 0.3 - z * 0.003);
   ctx.drawImage(p.sh, -p.w / 2, -p.h / 2, p.w, p.h);
-  ctx.fillStyle = '#000'; ctx.beginPath(); ctx.ellipse(w2[0], 0, 2.5, w2[1] * fa, 0, 0, 6.28); ctx.ellipse(w1[0], 0, 2.2, w1[1] * fb, 0, 0, 6.28); ctx.fill();
+  ctx.globalCompositeOperation = 'source-over'; ctx.filter = 'none';
+  const sa = ctx.globalAlpha; ctx.globalAlpha = sa * 0.6; drawWingsShadow(ctx, def, fl); ctx.globalAlpha = sa;
   ctx.restore();
-  ctx.save(); ctx.translate(0, -z); ctx.rotate(u.facing); ctx.scale(big, big);
-  if (bank) ctx.scale(1, 1 - Math.abs(bank) * 0.25);
-  if (kind === 'traeger' && o.carry) { ctx.save(); ctx.scale(0.62, 0.62); ctx.rotate(-u.facing); o.carry(); ctx.restore(); }
-  wings(ctx, w1[0], 0, w1[1], w1[2], w1[3], fb, 0.9, bank);
-  ctx.fillStyle = 'rgba(200,220,235,0.07)';
-  ctx.beginPath(); ctx.moveTo(2, 0); ctx.arc(2, 0, w2[1] + 3, -1.9, -1.2); ctx.closePath(); ctx.fill();
-  ctx.beginPath(); ctx.moveTo(2, 0); ctx.arc(2, 0, w2[1] + 3, 1.2, 1.9); ctx.closePath(); ctx.fill();
+  // Maschine
+  ctx.save(); ctx.translate(0, -z); ctx.rotate(u.facing); ctx.scale(sc, sc);
+  if (bank) ctx.scale(1, 1 - Math.abs(bank) * 0.22);
+  if (kind === 'traeger' && o.carry) { ctx.save(); ctx.translate(0, 0); ctx.scale(0.62, 0.62); ctx.rotate(-u.facing); o.carry(); ctx.restore(); }
+  drawPartShadow(ctx, p, 1.2, 1.6, 0.25);
   drawPart(ctx, p);
-  if (kind === 'falke' || kind === 'bomber') {
-    const ammo = u.ammo ?? def.ammo ?? 3, max = kind === 'bomber' ? 2 : 3;
-    for (let k = 0; k < max; k++) { ctx.fillStyle = k < ammo ? '#ffb070' : '#3a3a3a'; ctx.fillRect(-6 + k * 2.4, -0.8, 1.4, 1.6); }
+  if (kind === 'falke' || kind === 'bomber' || kind === 'adler') {
+    const ammo = u.ammo ?? 3, max = kind === 'bomber' ? 2 : 3;
+    for (let k = 0; k < max; k++) { ctx.fillStyle = k < ammo ? '#ffb070' : '#3a3a3a'; ctx.fillRect(-4 + k * 2.4, -0.7, 1.4, 1.4); }
   }
-  wings(ctx, w2[0], 0, w2[1], w2[2], w2[3], fa, 1, bank);
+  drawWings(0.95, false);
   ctx.restore();
+}
+function c2(ctx, fn) { ctx.save(); fn(); ctx.restore(); }
+function drawWingsShadow(ctx, def, fl) {
+  ctx.fillStyle = '#000';
+  def.wings.forEach(([x, rootY, len, chord], si) => {
+    for (const side of [-1, 1]) {
+      const L = len * fl(si ? Math.PI / 2 : 0);
+      ctx.beginPath(); ctx.moveTo(x - chord * 0.4, side * rootY); ctx.lineTo(x - chord * 0.5, side * (rootY + L)); ctx.lineTo(x + chord * 0.35, side * (rootY + L * 0.9)); ctx.lineTo(x + chord * 0.4, side * rootY); ctx.closePath(); ctx.fill();
+    }
+  });
 }
 
 // ---------- Zeichenfunktionen (Signatur wie DRAW in sprites.js) ----------

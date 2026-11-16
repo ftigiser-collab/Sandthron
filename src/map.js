@@ -56,7 +56,26 @@ export function generateMap(seed, W = 30, H = 22) {
   // Fahrzeug-Verbindung zwischen den Basen sicherstellen
   if (!reachable(ter, W, H, starts[0], starts[1])) carve(ter, W, H, starts[0], starts[1]);
 
-  const map = { W, H, seed, ter, spice, starts, idx };
+  // Schlüsselorte: Mitte und zwei umkämpfte Orte gleich weit von beiden Basen, je ein Heiligtum nahe jeder Basis
+  const targets = [[0.5, 0.5, 'zisterne'], [0.24, 0.78, 'warte'], [0.76, 0.22, 'schmuggler'], [0.36, 0.3, 'heiligtum'], [0.64, 0.7, 'heiligtum']];
+  const pois = [];
+  for (const [fx, fy, type] of targets) {
+    const tc = Math.round(fx * (W - 1)), tr = Math.round(fy * (H - 1));
+    let best = null, bd = 1e9;
+    for (let r = 1; r < H - 1; r++) for (let c = 1; c < W - 1; c++) {
+      if (starts.some((s) => distance(c, r, s.c, s.r) < 6) || pois.some((p) => distance(c, r, p.c, p.r) < 4)) continue;
+      const i = idx(c, r);
+      const d = distance(c, r, tc, tr) * 3 + (ter[i] === 'rock' ? 0 : ter[i] === 'mountain' ? 4 : 2) + (spice[i] > 0 ? 3 : 0);
+      if (d < bd) { bd = d; best = [c, r]; }
+    }
+    if (!best) continue;
+    const [c, r] = best, i = idx(c, r);
+    ter[i] = 'rock'; spice[i] = 0;
+    for (const [nc, nr] of neighbors(c, r, W, H)) if (ter[idx(nc, nr)] === 'mountain' && pois.length % 2 === 0) ter[idx(nc, nr)] = 'rock';
+    pois.push({ c, r, type });
+  }
+
+  const map = { W, H, seed, ter, spice, starts, idx, pois };
   map.size = worldSize(W, H);
   map.base = renderBase(map, N3, N4);
   return map;
