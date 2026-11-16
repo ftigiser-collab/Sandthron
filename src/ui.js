@@ -53,8 +53,19 @@ export class Controller {
     const segT = u.def.mt === 'air' ? 0.09 : u.def.cat === 'inf' ? 0.2 : 0.14;
     u.anim = true;
     const sand = (h) => this.g.isSand(h.c, h.r);
+    // Eigene Einheiten decken während der Bewegung auf, Feld für Feld (kein Verschwinden im Schwarz)
+    const g = this.g, revealed = new Set();
+    const sight = u.owner === 0 && !u.carried ? Math.max(1, u.def.sight - (g.isNight() && u.def.mt !== 'air' ? 1 : 0)) : 0;
+    const revealAt = (j) => {
+      if (!sight || revealed.has(j)) return; revealed.add(j);
+      const h = path[j]; let changed = false;
+      for (const [x, y] of ring(h.c, h.r, sight, g.W, g.H)) { const q = g.i(x, y); if (!g.visible[q] || !g.explored[q]) { g.visible[q] = 1; g.explored[q] = 1; changed = true; } }
+      if (changed) this.r.fogDirty = true;
+    };
+    revealAt(0);
     await this.tween(segT * (pts.length - 1), (k) => {
       const f = k * (pts.length - 1), i = Math.min(pts.length - 2, Math.floor(f)), l = f - i;
+      if (l > 0.25) revealAt(i + 1);
       const a = pts[i], b = pts[i + 1];
       u.vis = { x: a.x + (b.x - a.x) * l, y: a.y + (b.y - a.y) * l };
       const nf = Math.atan2(b.y - a.y, b.x - a.x);
