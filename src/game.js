@@ -159,6 +159,8 @@ export class Game {
     const key = (c, r) => r * this.W + c;
     res.set(key(u.c, u.r), { c: u.c, r: u.r, cost: 0, prev: null });
     if (u.landed) return res;
+    // Ernter fahren nur innerhalb der Glut, solange ein Ernte-Träger sie fliegt
+    const spiceOnly = u.def.harvester && this.units.some((x) => !x.dead && x.owner === u.owner && x.def.harvOnly);
     const open = [[u.c, u.r, 0]];
     while (open.length) {
       open.sort((a, b) => a[2] - b[2]);
@@ -168,6 +170,7 @@ export class Game {
         const k = key(nc, nr);
         const step = this.cost(u.def.mt, nc, nr);
         if (step === Infinity || this.blocked(u, nc, nr)) continue;
+        if (spiceOnly && this.spiceAt(nc, nr) <= 0) continue;
         const ng = g + step;
         if (ng > budget) continue;
         const cur = res.get(k);
@@ -508,7 +511,7 @@ export class Game {
           this.say(`${b.def.name} fertig`, 'good', owner);
           if (b.type === 'konvent') { const c = this.drawCard(owner); if (c) ev.push({ type: 'card', owner, card: c }); }
           ev.push({ type: 'built', b: b.id });
-          if (b.def.freeUnit) for (const t of [].concat(b.def.freeUnit)) { const u = this.spawnNear(owner, t, b.c, b.r); if (u) ev.push({ type: 'spawn', u: u.id, from: b.id }); }
+          if (b.def.freeUnit) for (const t of [].concat(b.def.freeUnit)) { const u = this.spawnNear(owner, t, b.c, b.r); if (u) { if (u.def.harvOnly) { u.docked = true; u.assigned = null; } ev.push({ type: 'spawn', u: u.id, from: b.id }); } }
         }
       }
       if (b.sabotaged > 0) { b.sabotaged--; if (b.sabotaged > 0 || b.producing) { if (b.producing) this.say(`${b.def.name}: Produktion durch Sabotage verzögert`, 'warn', owner); continue; } }
@@ -1031,7 +1034,7 @@ export class Game {
     if (!dest) return null;
     const from = { c: car.c, r: car.r }, at = { c: h.c, r: h.r };
     h.c = dest[0]; h.r = dest[1]; h.waitCarry = 0;
-    car.c = dest[0]; car.r = dest[1]; car.acted = true; car.moved = true;
+    car.c = dest[0]; car.r = dest[1]; car.acted = true; car.moved = true; car.docked = false; car.assigned = h.id;
     w.lock = null;
     if (h.owner === 0) this.say('Notrettung! Der Ernte-Träger hat den Ernter vor dem Wurm gerettet', 'good');
     return { type: 'rescue', car: car.id, h: h.id, from, at, to: { c: dest[0], r: dest[1] } };

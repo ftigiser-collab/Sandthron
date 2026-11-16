@@ -3,7 +3,7 @@ import { UNITS, BUILDINGS, WEAPONS, TERRAIN, MOVE_COST, CARDS, DROPS, FACTIONS, 
 import { center, pixelToHex, distance, R, ring } from './hex.js';
 import { icon, cardArt } from './sprites.js';
 import { angDiff } from './util.js';
-import { aiTurn, autoHarvest, autoCarry } from './ai.js';
+import { aiTurn, autoHarvest, autoCarry, carrierStation } from './ai.js';
 import { shipKind } from './shipart.js';
 import { crestImg } from './crest.js';
 import { SLOTS, slotMeta, writeSlot } from './saves.js';
@@ -782,7 +782,8 @@ export class Controller {
     this.clearHL();
     this.sel = e; this.r.hl.sel = e;
     this.mode = 'idle';
-    if (e.isUnit && e.owner === 0 && g.current === 0 && !this.busy) {
+    if (e.isUnit && e.owner === 0 && e.def.harvOnly) { /* Ernte-Träger: keine direkte Steuerung */ }
+    else if (e.isUnit && e.owner === 0 && g.current === 0 && !this.busy) {
       if (!e.moved && !e.acted) {
         this.reach = g.reachable(e);
         this.r.hl.move = this.reach;
@@ -838,7 +839,7 @@ export class Controller {
       }
       this.mode = 'moved'; this.select(this.sel); return;
     }
-    if (['card', 'orbital', 'voice', 'thump', 'capture', 'repair', 'infiltrate', 'callworm', 'strike', 'endgame'].includes(this.mode)) {
+    if (['card', 'orbital', 'voice', 'thump', 'capture', 'repair', 'infiltrate', 'callworm', 'strike', 'endgame', 'field'].includes(this.mode)) {
       const hit = this.r.hl.target.some(([tc, tr]) => tc === c && tr === r);
       const m = this.mode; this.clearHL(); this.mode = 'idle';
       if (!hit) { this.deselect(); return; }
@@ -849,6 +850,7 @@ export class Controller {
       else if (m === 'capture' || m === 'repair' || m === 'infiltrate') { const b = g.buildingAt(c, r); if (b) await this.doSpecial(m, this.sel, b); }
       else if (m === 'callworm') await this.doWormCall(this.sel, c, r);
       else if (m === 'strike') { if (g.orderStrike(0, c, r)) { const p = center(c, r); this.fx.ring(p.x, p.y, 20, '255,90,70', 0.7); } }
+      else if (m === 'field') await this.sendToField(this.sel, c, r);
       else if (m === 'endgame') { if (g.orderEndgame(0, c, r)) { const p = center(c, r); this.fx.ring(p.x, p.y, 40, '255,210,120', 0.8); this.fx.flash(p.x, p.y, 60, '255,220,150', 0.3); } }
       else if (m === 'voice') { const t = g.voiceTargets(this.sel).find((t) => t.c === c && t.r === r); if (t) await this.doVoice(this.sel, t); }
       this.busy = false; this.deselect(); this.refresh(); return;
@@ -952,6 +954,7 @@ export class Controller {
     // Auto-Träger und Auto-Ernter
     for (const u of g.ownUnits(0)) if (u.def.carrier && u.auto && !u.moved && !u.acted) await autoCarry(g, u, this.actAnimated);
     for (const u of g.ownUnits(0)) if (u.def.harvester && u.auto && !u.moved) await autoHarvest(g, u, this.actAnimated);
+    for (const u of g.ownUnits(0)) if (u.def.harvOnly) await carrierStation(g, u, this.actAnimated);
     await this.playEvents(g.endTurnEvents(0));
     if (this.checkEnd()) return;
     await this.playEvents(g.wormPhase());
@@ -1004,6 +1007,30 @@ export class Controller {
     try { localStorage.removeItem('sandthron-save'); } catch (e) {}
     this.onEnd?.();
     return true;
+  }
+
+  // Ernte-Träger-Befehle
+  freeCarrier(near) {
+    return this.g.ownUnits(0).filter((x) => x.def.harvOnly && !x.acted && !x.carrying && !x.dead).sort((p, q) => distance(p.c, p.r, near.c, near.r) - distance(q.c, q.r, near.c, near.r))[0] || null;
+  }
+  async evacuate(car) {
+    const g = this.g;
+    let h = g.get(car.assigned);
+    if (!h || h.dead || h.carried) h = g.ownUnits(0).filter((x) => x.def.harvester && !x.carried).sort((p, q) => distance(q.c, q.r, car.c, car.r) - distance(p.c, p.r, car.c, car.r))[0];
+    if (!h) { this.flash('Kein Sammler zum Evakuieren'); return; }
+    this.busy = true; this.showPanel(null);
+    const ok = await autoCarry(g, car, this.actAnimated, { h, goal: 'ref' });
+    this.busy = false; this.refresh();
+    this.flash(ok ? 'Sammler evakuiert' : 'Sammler außer Reichweite des Trägers');
+  }
+  async sendToField(h, c, r) {
+    const g = this.g, car = this.freeCarrier(h);
+    h.fieldTarget = { c, r };
+    if (car) {
+      const ok = await autoCarry(g, car, this.actAnimated, { h, goal: 'spice', dest: [c, r] });
+      if (ok) { this.flash('Sammler abgesetzt'); return; }
+    }
+    this.flash('Der Ernte-Träger bringt den Sammler am Rundenende hin');
   }
 
   // Spielmenü: Speichern in fünf Plätze, Laden, Hauptmenü
@@ -1299,14 +1326,20 @@ export class Controller {
         if (e.def.thumper) btns.push(g.canThump(e) ? '<button data-a="thump" class="purple">Klopfer setzen</button>' : `<button disabled>Klopfer bereit in ${e.thumpCd || 0} ${e.thumpCd === 1 ? 'Runde' : 'Runden'}</button>`);
         if (e.def.voice) btns.push(g.canVoice(e) ? (g.voiceTargets(e).length ? '<button data-a="voice" class="purple">Stimme einsetzen</button>' : '<button disabled>Stimme: kein Ziel in 2 Feldern</button>') : `<button disabled>Stimme bereit in ${e.voiceCd || 0} ${e.voiceCd === 1 ? 'Runde' : 'Runden'}</button>`);
         if (e.stunned > 0 || e.wasStunned) btns.push('<button disabled>Gelähmt</button>');
-        if (e.def.carrier) btns.push(`<button data-a="auto" class="${e.auto ? 'on' : ''}">Auto-Transport: ${e.auto ? 'an' : 'aus'}</button>`);
-        if (e.def.carrier && !e.acted) {
+        if (e.def.harvOnly) {
+          btns.push(`<button data-a="escort" class="${e.escort ? 'on' : ''}">Beim Sammler bleiben: ${e.escort ? 'an' : 'aus'}</button>`);
+          btns.push(e.acted ? '<button disabled>Evakuieren: Träger hat diese Runde schon geflogen</button>' : '<button data-a="evac" class="purple">Sammler evakuieren</button>');
+          btns.push('<span class="hint">Fliegt Ernter selbstständig zwischen Glut und Raffinerie und rettet sie vor Würmern.</span>');
+        }
+        if (e.def.harvester) btns.push(this.g.units.some((x) => !x.dead && x.owner === 0 && x.def.harvOnly) ? '<button data-a="field">Glutfeld anfliegen</button>' : '');
+        if (e.def.carrier && !e.def.harvOnly) btns.push(`<button data-a="auto" class="${e.auto ? 'on' : ''}">Auto-Transport: ${e.auto ? 'an' : 'aus'}</button>`);
+        if (e.def.carrier && !e.def.harvOnly && !e.acted) {
           if (e.carrying) btns.push('<button data-a="drop">Absetzen</button>');
           else if (g.units.some((t) => g.canPickup(e, t))) btns.push('<button data-a="pickup">Aufnehmen</button>');
         }
         if (g.canLand(e)) btns.push('<button data-a="land">⬇ Landen</button>');
         if (e.landed) btns.push(g.canTakeoff(e) ? '<button data-a="takeoff" class="primary">⬆ Starten</button>' : '<button disabled>Gelandet — nächste Runde startbereit</button>');
-        if (!e.acted) btns.push('<button data-a="wait">Warten</button>');
+        if (!e.acted && !e.def.harvOnly) btns.push('<button data-a="wait">Warten</button>');
         html += `<div class="p-actions">${btns.join('')}</div>`;
         const state = e.acted ? 'Hat gehandelt' : e.moved ? (g.canFire(e) ? 'Bewegt — kann noch angreifen' : 'Bewegt') : 'Bereit';
         html += `<div class="p-state">${state}</div>`;
@@ -1452,6 +1485,9 @@ export class Controller {
       return;
     }
     if (a === 'wait') { e.acted = true; e.moved = true; this.deselect(); this.refresh(); return; }
+    if (a === 'escort') { e.escort = !e.escort; if (e.escort && !g.get(e.assigned)) { const h = g.ownUnits(0).filter((x) => x.def.harvester).sort((p, q) => distance(q.c, q.r, e.c, e.r) - distance(p.c, p.r, e.c, e.r))[0]; if (h) e.assigned = h.id; } this.flash(e.escort ? 'Der Träger bleibt künftig beim Sammler' : 'Der Träger parkt künftig auf der Raffinerie'); this.showPanel(e); return; }
+    if (a === 'evac') { this.evacuate(e); return; }
+    if (a === 'field') { this.clearHL(); this.r.hl.sel = e; this.mode = 'field'; this.r.hl.target = []; for (let r = 0; r < g.H; r++) for (let c = 0; c < g.W; c++) if (g.spiceAt(c, r) > 0 && g.explored[g.i(c, r)] && (c !== e.c || r !== e.r)) this.r.hl.target.push([c, r]); $('#panel').classList.remove('show'); this.flash('Glutfeld antippen — der Ernte-Träger fliegt den Sammler hin'); return; }
     if (a === 'land') { if (g.canLand(e)) { this.busy = true; this.animLand(e, true).then(() => { this.busy = false; this.deselect(); this.refresh(); }); } return; }
     if (a === 'takeoff') { if (g.canTakeoff(e)) { this.busy = true; this.animLand(e, false).then(() => { this.busy = false; this.select(e); this.refresh(); }); } return; }
     if (a === 'auto') { e.auto = !e.auto; this.showPanel(e); return; }

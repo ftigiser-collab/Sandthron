@@ -339,8 +339,8 @@ export class Renderer {
     const turretUnit = u.type === 'panzer' || u.type === 'werfer' || u.type === 'laserpanzer' || u.type === 'koloss' || u.type === 'flakwagen';
     const idleTurret = turretUnit && !(u.aimUntil > this.t) ? Math.sin(this.t * 0.45 + u.id * 1.7) * 0.4 : (u.turretRel || 0);
     const air = u.def.mt === 'air';
-    const z = air ? (u.z ?? 26) + (u.crashing ? 0 : Math.sin(this.t * 2.2 + u.id) * 1.8) : 0;
-    const o = { ring: !u.crashing && !u.sink, scale: u.sink ? 1.62 * (1 - u.sink * 0.85) : undefined, bank: u.bank || 0, moving: !!u.anim, turret: idleTurret, recoil: u.recoil || 0, harvesting: u.harvestAnim > 0, z, landed: !!u.landed };
+    const z = air ? (u.docked && !u.anim && u.z === undefined ? 4 : (u.z ?? 26) + (u.crashing ? 0 : Math.sin(this.t * 2.2 + u.id) * 1.8)) : 0;
+    const o = { ring: !u.crashing && !u.sink, scale: u.sink ? 1.62 * (1 - u.sink * 0.85) : undefined, bank: u.bank || 0, moving: !!u.anim, turret: idleTurret, recoil: u.recoil || 0, harvesting: u.harvestAnim > 0, z, landed: !!u.landed || (!!u.docked && !u.anim && u.z === undefined) };
     if (u.def.carrier && u.carrying) {
       const c = g.get(u.carrying);
       if (c) o.carry = () => drawUnit(ctx, c, 0, 0, col, this.t, { turret: 0 });
