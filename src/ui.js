@@ -353,12 +353,20 @@ export class Controller {
     if (strike) { this.r.centerOn(end.x, end.y); await this.wait(0.25); }
     // 1. Anmarsch unter dem Sand: Sandwelle, Staub, Beben
     if (pts.length > 1) {
-      await this.tween(0.24 * (pts.length - 1) / Math.min(1.3, sc), (k) => {
+      // langsam und schwer: Großer Wurm braucht länger, sanftes An- und Ausgleiten
+      await this.tween(0.62 * (pts.length - 1) * (0.85 + 0.15 * sc), (k0) => {
+        const k = k0 < 0.5 ? 2 * k0 * k0 : 1 - Math.pow(-2 * k0 + 2, 2) / 2;
         const f = k * (pts.length - 1), i = Math.min(pts.length - 2, Math.floor(f)), l = f - i;
-        w.vis = { x: pts[i].x + (pts[i + 1].x - pts[i].x) * l, y: pts[i].y + (pts[i + 1].y - pts[i].y) * l };
-        w.dir = Math.atan2(pts[i + 1].y - pts[i].y, pts[i + 1].x - pts[i].x);
-        if (Math.random() < 0.8) fx.dust(w.vis.x - Math.cos(w.dir) * 20 * sc, w.vis.y - Math.sin(w.dir) * 20 * sc, 2, '200,150,95', 26 * sc, 7 * sc);
-        if (Math.random() < 0.5) fx.add({ kind: 'debris', x: w.vis.x + (Math.random() - 0.5) * 30 * sc, y: w.vis.y + (Math.random() - 0.5) * 16 * sc, vx: (Math.random() - 0.5) * 50, vy: (Math.random() - 0.5) * 30, vz: 60 + Math.random() * 90 * sc, life: 0.9, size: 2 + Math.random() * 2, col: '214,168,104', a: 1 });
+        // Catmull-Rom zwischen den Feldern für eine geschwungene Bahn
+        const P = (j) => pts[Math.max(0, Math.min(pts.length - 1, j))];
+        const p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2), l2 = l * l, l3 = l2 * l;
+        const cr = (a, b, c, d) => 0.5 * (2 * b + (-a + c) * l + (2 * a - 5 * b + 4 * c - d) * l2 + (-a + 3 * b - 3 * c + d) * l3);
+        const nx = cr(p0.x, p1.x, p2.x, p3.x), ny = cr(p0.y, p1.y, p2.y, p3.y);
+        if (w.vis) { const a = Math.atan2(ny - w.vis.y, nx - w.vis.x); if (Math.hypot(nx - w.vis.x, ny - w.vis.y) > 0.3) w.dir = a; }
+        w.vis = { x: nx, y: ny };
+        fx.shake = Math.max(fx.shake, 0.8 * sc);
+        if (Math.random() < 0.55) fx.dust(w.vis.x - Math.cos(w.dir) * 20 * sc, w.vis.y - Math.sin(w.dir) * 20 * sc, 2, '200,150,95', 26 * sc, 7 * sc);
+        if (Math.random() < 0.3) fx.add({ kind: 'debris', x: w.vis.x + (Math.random() - 0.5) * 30 * sc, y: w.vis.y + (Math.random() - 0.5) * 16 * sc, vx: (Math.random() - 0.5) * 50, vy: (Math.random() - 0.5) * 30, vz: 60 + Math.random() * 90 * sc, life: 0.9, size: 2 + Math.random() * 2, col: '214,168,104', a: 1 });
         if (strike) fx.shake = Math.max(fx.shake, 1.5 * sc * k);
       });
     }
@@ -590,23 +598,40 @@ export class Controller {
     if (evs.length) { g.cleanup(); this.checkEnd(); }
   }
 
+  // Träger landen zum Aufnehmen und Abladen: hinfliegen, absinken, Staub, Klammern, steigen, zurück
+  async landAt(car, x, y, onGround) {
+    const fx = this.fx, home = this.r.posOf(car), z0 = car.z ?? 26;
+    const ang = Math.atan2(y - home.y, x - home.x);
+    if (Math.hypot(x - home.x, y - home.y) > 2) { car.facing = ang; await this.tween(0.45, (k) => { const e = k * k * (3 - 2 * k); car.vis = { x: home.x + (x - home.x) * e, y: home.y + (y - home.y) * e }; }); }
+    car.vis = { x, y };
+    await this.tween(0.55, (k) => {
+      car.z = z0 - (z0 - 5) * (k * k * (3 - 2 * k));
+      if (Math.random() < 0.6 + k * 0.4) fx.dust(x + (Math.random() - 0.5) * 30, y + (Math.random() - 0.5) * 20, 1, '205,165,112', 30 * k + 10, 7);
+    });
+    fx.dust(x, y, 10, '205,165,112', 40, 8);
+    if (onGround) onGround();
+    await this.wait(0.25);
+    await this.tween(0.55, (k) => {
+      car.z = 5 + (z0 - 5) * (k * k * (3 - 2 * k));
+      if (Math.random() < 0.6 * (1 - k)) fx.dust(x + (Math.random() - 0.5) * 30, y + (Math.random() - 0.5) * 20, 1, '205,165,112', 26, 7);
+    });
+    if (Math.hypot(x - home.x, y - home.y) > 2) await this.tween(0.45, (k) => { const e = k * k * (3 - 2 * k); car.vis = { x: x + (home.x - x) * e, y: y + (home.y - y) * e }; });
+    car.vis = null; car.z = undefined;
+  }
   async animPickup(car, t) {
     const g = this.g;
-    g.pickup(car, t);
     if (car.owner === 0 || g.seen(car)) {
-      const from = center(t.c, t.r), to = this.r.posOf(car);
-      t.vis = { ...from }; await this.tween(0.4, (k) => { t.vis = { x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k - 20 * k }; }); t.vis = null;
-    }
+      const at = center(t.c, t.r);
+      await this.landAt(car, at.x, at.y, () => g.pickup(car, t));
+    } else g.pickup(car, t);
   }
   async animDrop(car, c, r) {
     const g = this.g;
-    const ev = g.drop(car, c, r); if (!ev) return;
-    const t = g.get(ev.t);
-    if (t && (car.owner === 0 || g.seen(car))) {
-      const from = this.r.posOf(car), to = center(c, r);
-      t.vis = { ...from }; await this.tween(0.4, (k) => { t.vis = { x: from.x + (to.x - from.x) * k, y: from.y - 20 * (1 - k) + (to.y - from.y) * k }; }); t.vis = null;
-      this.fx.dust(to.x, to.y, 8, '200,160,110', 20, 6);
-    }
+    if (car.owner === 0 || g.seen(car)) {
+      const at = center(c, r); let ev = null;
+      await this.landAt(car, at.x, at.y, () => { ev = g.drop(car, c, r); });
+      if (!ev) return;
+    } else if (!g.drop(car, c, r)) return;
     if (car.owner === 0) { g.updateVision(); this.r.fogDirty = true; }
   }
 
@@ -740,7 +765,7 @@ export class Controller {
   }
 
   async moveSelected(c, r) {
-    const g = this.g, u = this.sel;
+    const g = this.g, u = this.sel; u.rally = null;
     this.busy = true; this.clearHL(); this.r.hl.sel = u;
     await this.doMove(u, c, r, this.reach);
     this.busy = false;
@@ -780,6 +805,7 @@ export class Controller {
 
   async executeAttack() {
     const g = this.g, u = this.sel, t = this.confirmTarget, from = this.attackFrom;
+    if (u.isUnit && (from.c !== u.c || from.r !== u.r)) u.rally = null;
     this.busy = true; this.hideForecast(); this.clearHL();
     if (u.isUnit && (from.c !== u.c || from.r !== u.r)) await this.doMove(u, from.c, from.r, this.reach);
     if (!u.dead && !t.dead) await this.doAttack(u, t);
@@ -818,6 +844,7 @@ export class Controller {
     g.updateVision(); this.r.fogDirty = true;
     this.refresh();
     await this.banner(`Runde ${g.round}`, g.isNight() ? 'Euer Zug · Nacht: Bodensicht −1' : 'Euer Zug', 0.9);
+    if (this.rallyUnits().some((u) => u.rally)) { this.busy = false; await this.rallyStep(); }
     this.busy = false;
     $('#endturn').disabled = false;
     this.refresh();
@@ -844,6 +871,25 @@ export class Controller {
     try { localStorage.removeItem('sandthron-save'); } catch (e) {}
     this.onEnd?.();
     return true;
+  }
+
+  // Warnung, wenn noch Einheiten nicht bewegt wurden
+  idleUnits() { return this.g.ownUnits(0).filter((u) => !u.dead && !u.carried && !u.moved && !u.acted && !((u.def.harvester || u.def.carrier) && u.auto)); }
+  requestEndTurn() {
+    const g = this.g;
+    if (this.busy || g.current !== 0 || g.state !== 'play') return;
+    const idle = this.idleUnits();
+    if (!idle.length) { this.endTurn(); return; }
+    let box = document.getElementById('confirmbox');
+    if (!box) { box = document.createElement('div'); box.id = 'confirmbox'; document.getElementById('app').appendChild(box); }
+    box.innerHTML = `<div class="cb-card"><div class="cb-title">Noch ${idle.length} ${idle.length === 1 ? 'Einheit' : 'Einheiten'} nicht bewegt</div>
+      <div class="cb-text">Trotzdem die Runde beenden?</div>
+      <div class="cb-btns"><button data-a="show">Zur Einheit</button><button class="primary" data-a="end">Runde beenden</button></div></div>`;
+    box.classList.add('show');
+    const close = () => box.classList.remove('show');
+    box.querySelector('[data-a="show"]').onclick = () => { close(); const u = idle[0]; this.select(u); const p = center(u.c, u.r); this.r.centerOn(p.x, p.y); };
+    box.querySelector('[data-a="end"]').onclick = () => { close(); this.endTurn(); };
+    box.onclick = (e) => { if (e.target === box) close(); };
   }
 
   nextUnit() {
@@ -894,7 +940,7 @@ export class Controller {
     cv.addEventListener('wheel', (e) => { e.preventDefault(); this.r.camTarget = null; this.r.zoomAt(e.offsetX, e.offsetY, e.deltaY < 0 ? 1.12 : 1 / 1.12); }, { passive: false });
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') this.deselect();
-      else if (e.key === 'e' || e.key === 'E') this.endTurn();
+      else if (e.key === 'e' || e.key === 'E') this.requestEndTurn();
       else if (e.key === 'n' || e.key === 'N' || e.key === 'Tab') { e.preventDefault(); this.nextUnit(); }
       else if (e.key === ' ' && this.mode === 'confirm') { e.preventDefault(); this.executeAttack(); }
       const k = 40 / this.r.cam.z;
@@ -921,7 +967,7 @@ export class Controller {
 
   // ---------- DOM ----------
   bindDom() {
-    $('#endturn').onclick = () => this.endTurn();
+    $('#endturn').onclick = () => this.requestEndTurn();
     $('#nextunit').onclick = () => this.nextUnit();
     $('#helpbtn').onclick = () => $('#help').classList.toggle('show');
     $('#cardsbtn').onclick = () => this.showCards();
@@ -988,9 +1034,10 @@ export class Controller {
       const d = POIS[po.type], own = po.owner >= 0 ? g.players[po.owner] : null;
       $('#panel').innerHTML = `<div class="p-head"><div><div class="p-name">${d.icon} ${d.name}</div><div class="p-sub" style="color:${own ? own.color : '#cfc4b0'}">${own ? 'Gehalten von ' + own.name : 'Unbesetzt'}</div></div><button class="x" data-a="close">×</button></div>
         <p class="p-poi">${d.text}</p>
-        <p class="p-poi"><b>Einnehmen:</b> Eine eigene Bodeneinheit auf dem Feld zu Beginn eures Zuges. Der Ort bleibt eurer, bis eine feindliche Einheit ihn besetzt.</p>`;
+        <p class="p-poi"><b>Einnehmen:</b> Eine eigene Bodeneinheit auf dem Feld zu Beginn eures Zuges. Der Ort bleibt eurer, bis eine feindliche Einheit ihn besetzt.</p>${this.rallyBtn()}`;
       $('#panel').classList.add('show');
       $('#panel').querySelector('[data-a="close"]')?.addEventListener('click', () => this.showPanel(null));
+      this.hookRally(c, r);
       return;
     }
     const t = TERRAIN[g.terr(c, r)];
@@ -1000,8 +1047,50 @@ export class Controller {
       <div class="p-grid"><span>Deckung</span><b>${Math.round(t.def * 100)} %</b><span>Bebaubar</span><b>${t.build ? 'ja' : 'nein'}</b>
       <span>Wurmgebiet</span><b>${t.sand ? 'ja' : 'nein'}</b><span>Glut</span><b>${Math.round(sp)}</b>
       <span>Kosten Fuß/Rad/Kette</span><b>${mc('foot')}/${mc('wheel')}/${mc('track')}</b></div>
-      ${g.inStorm(c, r) ? '<div class="p-warn">Im Sturm — unpassierbar</div>' : g.stormNext(c, r) ? '<div class="p-warn">Sturm zieht nächste Runde hierher</div>' : ''}`;
+      ${g.inStorm(c, r) ? '<div class="p-warn">Im Sturm — unpassierbar</div>' : g.stormNext(c, r) ? '<div class="p-warn">Sturm zieht nächste Runde hierher</div>' : ''}${this.rallyBtn()}`;
     $('#panel').classList.add('show');
+    this.hookRally(c, r);
+  }
+
+  // ---------- Sammelbefehl: alle Einheiten (außer Ernter/Träger) marschieren zu einem Feld ----------
+  rallyUnits() { return this.g.ownUnits(0).filter((u) => !u.dead && !u.carried && !u.def.harvester && !u.def.carrier); }
+  rallyBtn() {
+    const g = this.g;
+    if (g.current !== 0 || g.state !== 'play' || !this.rallyUnits().length) return '';
+    return '<button class="primary wide" data-a="rally">⚑ Alle Einheiten hierher</button><div class="pi-why" style="color:#cfc4b0">Außer Ernter und Träger. Sie marschieren auch in den nächsten Runden weiter, bis sie da sind oder ihr sie selbst bewegt.</div>';
+  }
+  hookRally(c, r) {
+    const b = $('#panel').querySelector('[data-a="rally"]'); if (!b) return;
+    b.onclick = async () => { if (this.busy) return; await this.rallyTo(c, r); };
+  }
+  async rallyTo(c, r) {
+    const us = this.rallyUnits();
+    for (const u of us) u.rally = { c, r };
+    this.showPanel(null);
+    this.flash(`${us.length} Einheiten auf dem Marsch`);
+    await this.rallyStep();
+  }
+  async rallyStep() {
+    const g = this.g;
+    const list = this.rallyUnits().filter((u) => u.rally);
+    if (!list.length) return;
+    this.busy = true;
+    // nächste zuerst, damit die Spitze den Weg freimacht
+    list.sort((a, b) => distance(a.c, a.r, a.rally.c, a.rally.r) - distance(b.c, b.r, b.rally.c, b.rally.r));
+    for (const u of list) {
+      if (u.dead || !u.rally) continue;
+      const { c, r } = u.rally;
+      if (distance(u.c, u.r, c, r) <= 1 || (u.c === c && u.r === r)) { u.rally = null; continue; }
+      if (u.moved || u.acted) continue;
+      const reach = g.reachable(u), field = g.distanceField(u);
+      const st = g.stepToward(u, field, c, r, reach);
+      if (!st || (st.c === u.c && st.r === u.r)) continue;
+      await this.doMove(u, st.c, st.r, reach);
+      if (!u.dead && distance(u.c, u.r, c, r) <= 1) u.rally = null;
+      if (g.state !== 'play') break;
+    }
+    this.busy = false;
+    this.refresh();
   }
 
   showPanel(e, keep = false) {

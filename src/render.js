@@ -550,6 +550,16 @@ export class Renderer {
       this.brackets(ctx, p.x, p.y, R - 3 - pulse * 3, 'rgba(255,80,60,1)', 2);
     }
     if (hl.hover) { const p = center(hl.hover.c, hl.hover.r); fillHex(hl.hover.c, hl.hover.r, 'rgba(255,255,255,0.07)', null); this.brackets(ctx, p.x, p.y, R - 3, 'rgba(255,255,255,0.7)', 1.5); }
+    // Sammelpunkte: Flagge am Ziel
+    const seenR = new Set();
+    for (const u of this.g.units) {
+      if (u.dead || u.owner !== 0 || !u.rally) continue;
+      const k = u.rally.c + ',' + u.rally.r; if (seenR.has(k)) continue; seenR.add(k);
+      const p = center(u.rally.c, u.rally.r), wv = Math.sin(t * 4) * 2;
+      ctx.strokeStyle = 'rgba(255,220,140,0.5)'; ctx.setLineDash([4, 5]); ctx.lineWidth = 1.5; ctx.beginPath(); hexPath(ctx, p.x, p.y, R - 6); ctx.stroke(); ctx.setLineDash([]);
+      ctx.strokeStyle = '#2a2018'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(p.x, p.y + 10); ctx.lineTo(p.x, p.y - 18); ctx.stroke();
+      ctx.fillStyle = this.g.players[0].color; ctx.beginPath(); ctx.moveTo(p.x + 1, p.y - 18); ctx.quadraticCurveTo(p.x + 9, p.y - 19 + wv, p.x + 16, p.y - 14); ctx.lineTo(p.x + 1, p.y - 9); ctx.closePath(); ctx.fill();
+    }
     if (hl.sel) {
       const p = center(hl.sel.c, hl.sel.r);
       this.brackets(ctx, p.x, p.y, R - 1, 'rgba(255,220,140,0.3)', 6);
