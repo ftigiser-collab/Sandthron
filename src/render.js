@@ -136,6 +136,16 @@ export class Renderer {
 
     this.drawWrecks(ctx, dt);
     for (const th of g.thumpers) if (th.owner === 0 || g.visible[g.i(th.c, th.r)]) { const p = center(th.c, th.r); drawThumper(ctx, p.x, p.y, this.t); }
+    for (const st of g.strikes) {
+      const p = center(st.c, st.r), k = (this.t * 1.2) % 1;
+      ctx.strokeStyle = `rgba(255,60,40,${0.9 - k * 0.6})`; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 70 * (1 - k * 0.3), 0, 6.28); ctx.stroke();
+      ctx.setLineDash([8, 8]); ctx.lineDashOffset = -this.t * 30; ctx.lineWidth = 1.5;
+      for (const [c, r] of ring(st.c, st.r, 1, g.W, g.H)) { const q = center(c, r); ctx.beginPath(); hexPath(ctx, q.x, q.y, R - 4); ctx.stroke(); }
+      ctx.setLineDash([]);
+      ctx.strokeStyle = 'rgba(255,80,60,0.9)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(p.x - 14, p.y); ctx.lineTo(p.x + 14, p.y); ctx.moveTo(p.x, p.y - 14); ctx.lineTo(p.x, p.y + 14); ctx.stroke();
+    }
+    for (const wc of g.wormCalls) if (wc.owner === 0) { const p = center(wc.c, wc.r); drawThumper(ctx, p.x, p.y, this.t * 1.6); }
     for (const d of g.players[0].pendingDrops) {
       const p = center(d.c, d.r), k = (this.t * 1.5) % 1;
       ctx.strokeStyle = `rgba(255,210,120,${1 - k})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, 6 + k * 26, 0, 6.28); ctx.stroke();
@@ -203,7 +213,7 @@ export class Renderer {
 
   drawUnitFull(ctx, u) {
     const g = this.g;
-    const p = this.posOf(u);
+    let p = this.posOf(u);
     const col = g.players[u.owner].color;
     const done = u.owner === g.current && g.current === 0 && (u.acted || (u.moved && !g.canFire(u) && !(u.def.carrier && !u.acted)));
     if (this.hl.sel === u) {
@@ -212,7 +222,7 @@ export class Renderer {
       ctx.beginPath(); hexPath(ctx, 0, 0, R - 5); ctx.stroke(); ctx.restore();
     }
     ctx.save();
-    const turretUnit = u.type === 'panzer' || u.type === 'werfer';
+    const turretUnit = u.type === 'panzer' || u.type === 'werfer' || u.type === 'laserpanzer' || u.type === 'koloss' || u.type === 'flakwagen';
     const idleTurret = turretUnit && !(u.aimUntil > this.t) ? Math.sin(this.t * 0.45 + u.id * 1.7) * 0.4 : (u.turretRel || 0);
     const air = u.def.mt === 'air';
     const z = air ? (u.z ?? 26) + (u.crashing ? 0 : Math.sin(this.t * 2.2 + u.id) * 1.8) : 0;
@@ -221,9 +231,16 @@ export class Renderer {
       const c = g.get(u.carrying);
       if (c) o.carry = () => drawUnit(ctx, c, 0, 0, col, this.t, { turret: 0 });
     }
+    if (u.owner === 0 && u.def.stealth && g.stealthed(u, 1)) ctx.globalAlpha = 0.55;
+    let py = p.y;
+    if (u.def.cat === 'veh' && u.anim) py += Math.sin(this.t * 22 + u.id) * 0.7;
+    const savedFacing = u.facing;
+    if (u.def.cat === 'inf' && !u.anim && !(u.aimUntil > this.t)) u.facing = savedFacing + Math.sin(this.t * 0.6 + u.id * 2.1) * 0.25;
+    const p0 = p; p = { x: p0.x, y: py };
     if (u.hitFlash > 0.05) this.tinted(ctx, p.x, p.y, `rgba(255,255,255,${u.hitFlash * 0.65})`, (oc) => drawUnit(oc, u, 0, 0, col, this.t, o));
     else if (done) this.tinted(ctx, p.x, p.y, 'rgba(70,64,58,0.5)', (oc) => drawUnit(oc, u, 0, 0, col, this.t, o));
     else drawUnit(ctx, u, p.x, p.y, col, this.t, o);
+    u.facing = savedFacing;
     ctx.restore();
     // Leerlauf: Abgase, Erntewalze
     if (u.def.cat === 'veh' && Math.random() < (u.anim ? 0.25 : 0.03)) {

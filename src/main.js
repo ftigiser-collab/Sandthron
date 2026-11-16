@@ -65,7 +65,7 @@ async function start(save, mission) {
     const seedIn = $('#seed').value.trim();
     seed = seedIn ? (parseInt(seedIn, 10) || hash(seedIn)) : Math.floor(Math.random() * 1e6);
     map = generateMap(seed);
-    const foes = ['vareth', 'kordan', 'ossar'].filter((f) => f !== faction);
+    const foes = ['vareth', 'kordan', 'ossar', 'sandvolk'].filter((f) => f !== faction);
     game = new Game(map, { diff: DIFFICULTY[diff], playerFaction: faction, enemyFaction: foes[Math.floor(Math.random() * foes.length)] });
     game.diffName = diff;
     game.setup();

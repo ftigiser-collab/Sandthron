@@ -1,5 +1,5 @@
 // Spielregeln und Zustand (rundenbasiert)
-import { UNITS, BUILDINGS, WEAPONS, ARMOR_MOD, TERRAIN, MOVE_COST, FACTIONS, START_CREDITS, DROPS, CARDS, WORM_SIZES } from './data.js';
+import { UNITS, BUILDINGS, WEAPONS, ARMOR_MOD, TERRAIN, MOVE_COST, FACTIONS, START_CREDITS, DROPS, CARDS, WORM_SIZES, ORBITAL_STRIKE, SHIELD_PIERCE } from './data.js';
 import { neighbors, distance, ring, center } from './hex.js';
 const ang = (c1, r1, c2, r2) => { const a = center(c1, r1), b = center(c2, r2); return Math.atan2(b.y - a.y, b.x - a.x); };
 import { mulberry32 } from './util.js';
@@ -26,6 +26,8 @@ export class Game {
     this.state = 'play';
     this.storm = null;
     this.thumpers = [];
+    this.strikes = [];
+    this.wormCalls = [];
     this.revealRound = 0;
   }
   mkPlayer(id, faction) {
@@ -36,11 +38,11 @@ export class Game {
   // ---------- Fraktionsboni ----------
   unitCost(owner, type) {
     const d = UNITS[type], pk = this.players[owner].perk;
-    return Math.round(d.cost * (d.mt === 'air' && pk.airCost ? pk.airCost : 1));
+    return Math.round(d.cost * (d.mt === 'air' && pk.airCost ? pk.airCost : 1) * (d.cat === 'sv' && pk.svCost ? pk.svCost : 1));
   }
   moveOf(u) {
     const pk = this.players[u.owner].perk;
-    return u.def.move + (u.def.mt === 'air' && pk.airMove ? pk.airMove : 0) + ((u.def.mt === 'foot' || u.def.mt === 'sandfoot') && pk.infMove ? pk.infMove : 0);
+    return u.def.move + (u.def.mt === 'air' && pk.airMove ? pk.airMove : 0) + ((u.def.mt === 'foot' || u.def.mt === 'sandfoot') && pk.infMove ? pk.infMove : 0) + (u.def.cat === 'sv' && pk.svMove ? pk.svMove : 0);
   }
   dropCost(owner, id) {
     const p = this.players[owner];
@@ -85,7 +87,7 @@ export class Game {
   has(owner, type, done = true) { return this.buildings.some((b) => !b.dead && b.owner === owner && b.type === type && (!done || b.turnsLeft <= 0)); }
   hasActive(owner, type) { return this.buildings.some((b) => b.owner === owner && b.type === type && this.active(b)); }
   count(owner, type) { return this.buildings.filter((b) => !b.dead && b.owner === owner && b.type === type && b.turnsLeft <= 0).length; }
-  prereqOk(owner, def) { return !def.prereq || def.prereq.every((t) => this.has(owner, t)); }
+  prereqOk(owner, def) { return (!def.faction || def.faction === this.players[owner].faction) && (!def.prereq || def.prereq.every((t) => this.has(owner, t))); }
   ownUnits(o) { return this.units.filter((u) => !u.dead && u.owner === o); }
 
   addUnit(owner, type, c, r) {
@@ -101,6 +103,15 @@ export class Game {
     this.buildings.push(b); this.byId.set(b.id, b);
     this.updatePower();
     return b;
+  }
+
+  // ---------- Tarnung ----------
+  stealthed(u, viewer = 0) {
+    if (!u || !u.isUnit || u.owner === viewer || !u.def.stealth) return false;
+    const st = u.def.stealth;
+    if (st === 'sand' && !this.isSand(u.c, u.r)) return false;
+    if (st === 'still' && (u.moved || u.attacked)) return false;
+    return !this.units.some((p) => !p.dead && p.owner === viewer && !p.carried && distance(p.c, p.r, u.c, u.r) <= 1);
   }
 
   // ---------- Strom ----------
@@ -124,7 +135,7 @@ export class Game {
     if (this.inStorm(c, r) && !(c === u.c && r === u.r)) return true;
     if (!air) { const b = this.buildingAt(c, r); if (b) return true; }
     const o = this.unitAt(c, r, air);
-    if (o && o.owner !== u.owner && (u.owner !== 0 || this.visible[this.i(c, r)])) return true;
+    if (o && o.owner !== u.owner && !this.stealthed(o, u.owner) && (u.owner !== 0 || this.visible[this.i(c, r)])) return true;
     if (!air) { const w = this.worms.find((w) => w.surfaced && w.c === c && w.r === r); if (w) return true; }
     return false;
   }
@@ -151,7 +162,7 @@ export class Game {
     // Endfelder: nicht von eigenen (oder sichtbaren) Einheiten besetzt
     for (const [k, v] of res) {
       const occ = this.unitAt(v.c, v.r, u.def.mt === 'air');
-      v.end = !occ || occ === u || (occ.owner !== u.owner && u.owner === 0 && !this.visible[this.i(v.c, v.r)]);
+      v.end = !occ || occ === u || (occ.owner !== u.owner && (this.stealthed(occ, u.owner) || (u.owner === 0 && !this.visible[this.i(v.c, v.r)])));
     }
     return res;
   }
@@ -240,6 +251,7 @@ export class Game {
     for (const t of this.units) {
       if (t.dead || t.carried || t.owner === e.owner || !this.canHit(w, t)) continue;
       if (onlyVisible && !this.visible[this.i(t.c, t.r)]) continue;
+      if (this.stealthed(t, e.owner)) continue;
       if (this.inRange(w, c, r, t.c, t.r)) out.push(t);
     }
     if (w.ground) for (const b of this.buildings) {
@@ -259,6 +271,10 @@ export class Game {
     let dmg = w.power * mod * hpF * (1 - def);
     if (att.isUnit && att.def.cat === 'veh') dmg *= this.players[att.owner].perk.vehPower || 1;
     if (t.shield > 0) dmg *= 0.5;
+    if (t.isUnit && t.def.shield && !SHIELD_PIERCE.includes(w.type)) dmg *= 0.4;
+    if (t.isUnit && t.def.tough) dmg *= t.def.tough;
+    if (t.isUnit && t.def.elite) dmg *= t.def.elite;
+    if (w.type === 'laser' && t.isUnit && t.def.shield) dmg *= 2.5;
     if (t.isBuilding) dmg = dmg * t.maxHp / 100; // Gebäude-TP skalieren
     return dmg;
   }
@@ -293,6 +309,13 @@ export class Game {
     if (w.ammo) att.ammo--;
     att.facing = ang(att.c, att.r, t.c, t.r);
     const ev = { type: 'attack', att: att.id, target: t.id, dmg: this.pct(dmg, t), proj: w.proj, counter: 0, killed: false, counterKilled: false };
+    if (w.type === 'laser' && t.isUnit && t.def.shield) {
+      // Laser trifft Schild: Reaktion trifft auch den Schützen und alles daneben
+      ev.shieldBlast = true;
+      att.hp -= 30;
+      for (const o of this.units) if (!o.dead && o !== t && o !== att && !o.carried && distance(o.c, o.r, t.c, t.r) === 1) { o.hp -= 25; if (o.hp <= 0.5) this.kill(o, att); }
+      if (att.hp <= 0.5) { ev.counterKilled = true; this.kill(att, t); }
+    }
     if (t.hp <= 0.5) { ev.killed = true; this.kill(t, att); }
     else if (this.canCounter(t, att)) {
       const cw = this.weapon(t);
@@ -418,9 +441,11 @@ export class Game {
         else this.say(`${b.def.name}: kein Platz zum Ausrücken`, 'warn', owner);
       }
     }
-    // Orbital-Drops landen
+    // Orbitalbombardement schlägt ein, Orbital-Drops landen
     const p = this.players[owner];
     if (p.dropCd > 0) p.dropCd--;
+    if (p.strikeCd > 0) p.strikeCd--;
+    ev.push(...this.resolveStrikes(owner));
     for (const d of p.pendingDrops) {
       const ids = [];
       for (const t of DROPS[d.id].units) { const u = this.spawnNear(owner, t, d.c, d.r); if (u) { u.dropped = true; ids.push(u.id); } }
@@ -438,6 +463,7 @@ export class Game {
       u.moved = false; u.acted = false; u.harvested = false; u.attacked = false; u.reflex = false; u.ambushed = false;
       if (u.voiceCd > 0) u.voiceCd--;
       if (u.thumpCd > 0) u.thumpCd--;
+      if (u.wormCd > 0) u.wormCd--;
       if (u.shield > 0) u.shield--;
       if (u.stunned > 0) { u.stunned--; u.moved = true; u.acted = true; u.wasStunned = true; } else u.wasStunned = false;
       if (u.def.ammo && u.ammo < u.def.ammo) {
@@ -518,6 +544,77 @@ export class Game {
     return true;
   }
 
+  // ---------- Pionier, Spion, Wurmreiter ----------
+  adjBuildings(u, enemy) {
+    return this.buildings.filter((b) => !b.dead && (enemy ? b.owner !== u.owner : b.owner === u.owner) && distance(b.c, b.r, u.c, u.r) === 1 && (!enemy || u.owner !== 0 || this.explored[this.i(b.c, b.r)]));
+  }
+  canAct(u) { return !u.acted && u.owner === this.current && !u.carried; }
+  capture(u, b) {
+    const from = b.owner;
+    b.owner = u.owner; b.producing = null; b.sabotaged = 0; b.reflex = false;
+    u.dead = true;
+    this.say(u.owner === 0 ? `${b.def.name} übernommen!` : `Der Feind hat euer Gebäude übernommen: ${b.def.name}`, u.owner === 0 ? 'good' : 'bad');
+    this.updatePower();
+    return { type: 'capture', u: u.id, b: b.id, from };
+  }
+  repair(u, b) {
+    b.hp = Math.min(b.maxHp, b.hp + b.maxHp * 0.5); u.acted = true; u.moved = true;
+    return { type: 'repair', u: u.id, b: b.id };
+  }
+  infiltrate(u, b) {
+    const foe = this.players[b.owner], me = this.players[u.owner];
+    const steal = Math.min(400, Math.floor(foe.credits));
+    foe.credits -= steal; me.credits += steal;
+    b.sabotaged = 2;
+    if (u.owner === 0) for (const [c, r] of ring(b.c, b.r, 4, this.W, this.H)) this.explored[this.i(c, r)] = 1;
+    u.dead = true;
+    this.say(u.owner === 0 ? `Spion in ${b.def.name}: ${steal} Credits erbeutet, Gebäude 2 Runden lahmgelegt` : `Ein feindlicher Spion hat ${b.def.name} sabotiert (${steal} Credits gestohlen)`, u.owner === 0 ? 'good' : 'bad');
+    this.updatePower();
+    return { type: 'infiltrate', u: u.id, b: b.id, steal };
+  }
+  canCallWorm(u) { return u.def.callWorm && !(u.wormCd > 0) && this.canAct(u); }
+  callWormHexes(u) { return ring(u.c, u.r, 5, this.W, this.H).filter(([c, r]) => this.isSand(c, r) && !this.buildings.some((b) => !b.dead && distance(b.c, b.r, c, r) <= 2)); }
+  callWorm(u, c, r) {
+    this.wormCalls.push({ c, r, owner: u.owner });
+    u.wormCd = 4; u.acted = true; u.moved = true;
+    if (u.owner === 0) this.say('Der Wurmreiter schlägt den Ruf — in der nächsten Wurmphase kommt ein Großer Wurm', 'good');
+    return { type: 'wormcall', u: u.id, c, r };
+  }
+
+  // ---------- Orbitalbombardement ----------
+  canStrike(owner) {
+    const p = this.players[owner];
+    return this.hasActive(owner, 'kontor') && !p.low && !(p.strikeCd > 0) && p.credits >= ORBITAL_STRIKE.cost && this.current === owner;
+  }
+  strikeHexes(owner) {
+    const out = [];
+    for (let r = 0; r < this.H; r++) for (let c = 0; c < this.W; c++) if (owner !== 0 || this.explored[this.i(c, r)]) out.push([c, r]);
+    return out;
+  }
+  orderStrike(owner, c, r) {
+    if (!this.canStrike(owner)) return false;
+    const p = this.players[owner];
+    p.credits -= ORBITAL_STRIKE.cost; p.strikeCd = ORBITAL_STRIKE.cooldown;
+    this.strikes.push({ c, r, owner });
+    this.say(owner === 0 ? 'Orbitalbombardement angefordert — Einschlag zu Beginn eurer nächsten Runde' : 'Warnung: feindliches Orbitalbombardement im Anflug! Zielzone räumen', owner === 0 ? 'good' : 'bad');
+    return true;
+  }
+  resolveStrikes(owner) {
+    const ev = [];
+    for (const s of this.strikes.filter((x) => x.owner === owner)) {
+      const hits = [];
+      for (const [c, r] of ring(s.c, s.r, ORBITAL_STRIKE.radius, this.W, this.H)) {
+        for (const u of this.units) if (!u.dead && !u.carried && u.c === c && u.r === r) { const d = ORBITAL_STRIKE.unitDmg * (c === s.c && r === s.r ? 1.3 : 1) * (u.def.tough || 1); u.hp -= d; hits.push({ id: u.id, dmg: Math.round(d) }); if (u.hp <= 0.5) this.kill(u, { owner }); }
+        const b = this.buildingAt(c, r);
+        if (b) { const d = b.maxHp * ORBITAL_STRIKE.bldDmg; b.hp -= d; hits.push({ id: b.id, dmg: Math.round(ORBITAL_STRIKE.bldDmg * 100) }); if (b.hp <= 0) this.kill(b, { owner }); }
+        if (this.map.spice[this.i(c, r)] > 0) this.map.spice[this.i(c, r)] *= 0.5;
+      }
+      ev.push({ type: 'strike', owner, c: s.c, r: s.r, hits });
+    }
+    this.strikes = this.strikes.filter((x) => x.owner !== owner);
+    return ev;
+  }
+
   // ---------- Schwester ----------
   canVoice(u) { return u.def.voice && !(u.voiceCd > 0) && !u.acted && u.owner === this.current; }
   voiceTargets(u) {
@@ -566,9 +663,10 @@ export class Game {
     for (const u of this.units) {
       if (u.dead || u.owner !== owner || u.carried || u.def.mt === 'air' || !this.isSand(u.c, u.r)) { if (!u.dead) { u.vib = 0; u.fought = false; } continue; }
       const veh = u.def.cat === 'veh';
-      if (u.def.vib === 0) { u.vib = u.fought ? 1 : 0; u.fought = false; continue; }
+      if (u.def.vib === 0 && !(u.shield > 0)) { u.vib = u.fought ? 1 : 0; u.fought = false; continue; }
       u.vib = u.harvested ? 4 : u.dropped ? 3 : u.moved ? (veh ? 2.5 : 1.2) : (veh ? 0.8 : 0.3);
       if (u.fought) u.vib += 2;
+      if (u.def.shield || u.shield > 0) u.vib += 4; // Schilde machen Würmer rasend
       u.dropped = false; u.fought = false;
     }
     return ev;
@@ -660,6 +758,17 @@ export class Game {
 
   wormPhase() {
     const ev = [];
+    // Gerufene Würmer brechen zuerst hervor
+    for (const call of this.wormCalls) {
+      const w = this.spawnWorm(call.c, call.r); if (!w) continue;
+      w.size = 2;
+      const hexes = this.wormBite(w, call.c, call.r);
+      const eaten = this.units.filter((u) => !u.dead && !u.carried && u.def.mt !== 'air' && hexes.some(([c, r]) => c === u.c && r === u.r));
+      for (const u of eaten) { this.kill(u, { owner: call.owner }); this.players[u.owner].stats.eaten++; }
+      w.sated = 2;
+      ev.push({ type: 'worm', id: w.id, path: [{ c: call.c, r: call.r }], eatMany: eaten.map((u) => u.id), eatHexes: hexes, called: true });
+    }
+    this.wormCalls = [];
     for (const w of this.worms) ev.push(...this.wormTurn(w));
     this.updateVision();
     return ev;
@@ -710,7 +819,8 @@ export class Game {
       for (const u of this.units) {
         if (u.dead || u.carried || u.def.mt === 'air' || !this.isSand(u.c, u.r)) continue;
         const d = distance(w.c, w.r, u.c, u.r);
-        if (d > 11 || !sandPass(u.c, u.r)) continue;
+        const shielded = u.def.shield || u.shield > 0;
+        if (d > (shielded ? 16 : 11) || !sandPass(u.c, u.r)) continue;
         const s = (u.vib + (u.def.harvester ? 1 : 0)) / (1 + d * 0.22);
         if (s > bs) { bs = s; best = u; }
       }
@@ -826,7 +936,7 @@ export class Game {
   seen(e) {
     if (e.owner === 0) return true;
     if (e.isBuilding) return !!this.explored[this.i(e.c, e.r)];
-    return !!this.visible[this.i(e.c, e.r)];
+    return !!this.visible[this.i(e.c, e.r)] && !this.stealthed(e, 0);
   }
 
   checkEnd() {
@@ -850,7 +960,7 @@ export class Game {
     return JSON.stringify({ v: 2, seed: this.map.seed, ter: this.map.ter, spice: Array.from(this.map.spice), round: this.round, current: this.current,
       players: this.players, units: this.units.filter((u) => !u.dead).map(strip), buildings: this.buildings.filter((b) => !b.dead).map(strip),
       worms: this.worms.map(strip), storm: { c: this.storm.c, r: this.storm.r, rad: this.storm.rad, dir: this.storm.dir, next: this.storm.next },
-      thumpers: this.thumpers, explored: Array.from(this.explored).join(''), revealRound: this.revealRound, aiMode: this.aiMode, diffName: this.diffName, missionId: this.mission?.id || null, aiPassive: !!this.aiPassive });
+      thumpers: this.thumpers, strikes: this.strikes, wormCalls: this.wormCalls, explored: Array.from(this.explored).join(''), revealRound: this.revealRound, aiMode: this.aiMode, diffName: this.diffName, missionId: this.mission?.id || null, aiPassive: !!this.aiPassive });
   }
   static restore(map, data, diff) {
     map.ter = data.ter; map.spice = Float32Array.from(data.spice);
@@ -859,7 +969,7 @@ export class Game {
     g.players = data.players.map((p) => ({ ...p, perk: FACTIONS[p.faction].perk || {} }));
     g.units = data.units.map((u) => ({ ...u, def: UNITS[u.type] }));
     g.buildings = data.buildings.map((b) => ({ ...b, def: BUILDINGS[b.type], rise: 1 }));
-    g.worms = data.worms; g.storm = data.storm; g.thumpers = data.thumpers || [];
+    g.worms = data.worms; g.storm = data.storm; g.thumpers = data.thumpers || []; g.strikes = data.strikes || []; g.wormCalls = data.wormCalls || [];
     for (const e of [...g.units, ...g.buildings, ...g.worms]) { g.byId.set(e.id, e); NEXT = Math.max(NEXT, e.id + 1); }
     for (let k = 0; k < data.explored.length; k++) g.explored[k] = data.explored.charCodeAt(k) === 49 ? 1 : 0;
     g.rnd = mulberry32(map.seed * 7 + data.round * 131);

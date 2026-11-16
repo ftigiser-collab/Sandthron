@@ -1,6 +1,6 @@
 // Steuerung: Eingabe, Auswahl, Menüs, Animationen, Rundenablauf
-import { UNITS, BUILDINGS, WEAPONS, TERRAIN, MOVE_COST, CARDS, DROPS, FACTIONS, ARMOR_MOD } from './data.js';
-import { center, pixelToHex, distance, R } from './hex.js';
+import { UNITS, BUILDINGS, WEAPONS, TERRAIN, MOVE_COST, CARDS, DROPS, FACTIONS, ARMOR_MOD, ORBITAL_STRIKE } from './data.js';
+import { center, pixelToHex, distance, R, ring } from './hex.js';
 import { icon, cardArt } from './sprites.js';
 import { angDiff } from './util.js';
 import { aiTurn, autoHarvest, autoCarry } from './ai.js';
@@ -24,6 +24,9 @@ export class Controller {
       card: (owner, idx, c, r) => this.doCard(owner, idx, c, r),
       pickup: (car, t) => this.animPickup(car, t),
       thump: (u, c, r) => this.doThump(u, c, r),
+      capture: (u, b) => this.doSpecial('capture', u, b),
+      infiltrate: (u, b) => this.doSpecial('infiltrate', u, b),
+      callWorm: (u, c, r) => this.doWormCall(u, c, r),
       drop: (car, c, r) => this.animDrop(car, c, r),
     };
     this.bindInput();
@@ -79,10 +82,11 @@ export class Controller {
     const fx = this.fx;
     const team = a.owner === 0 ? '170,215,255' : '255,190,150';
     if (proj === 'bullet') {
+      const ang = Math.atan2(ty - sy, tx - sx);
       return this.tween(0.45, (k, dt) => {
         if (Math.random() < dt * 22) {
           const jx = (Math.random() - 0.5) * 16, jy = (Math.random() - 0.5) * 16;
-          fx.tracer(sx, sy, tx + jx, ty + jy, team); fx.flash(sx, sy, 7, '255,230,160', 0.05);
+          fx.tracer(sx, sy, tx + jx, ty + jy, team); fx.muzzle(sx, sy, ang, 0.6); if (Math.random() < 0.5) fx.casing(sx, sy, ang);
           if (Math.random() < 0.6) fx.spark(tx + jx, ty + jy, 2, '255,230,170', 60);
         }
       }).then(() => fx.dust(tx, ty, 3, '170,150,120', 10, 4));
@@ -91,6 +95,28 @@ export class Controller {
       return this.tween(0.5, (k, dt) => {
         if (Math.random() < dt * 9) { const jx = (Math.random() - 0.5) * 26, jy = (Math.random() - 0.5) * 26; fx.flash(tx + jx, ty + jy, 14, '255,210,140', 0.15); fx.smoke(tx + jx, ty + jy, 2, 4, 0.9); fx.flash(sx, sy, 9, '255,220,150', 0.05); }
       });
+    }
+    if (proj === 'laser') {
+      fx.flash(sx, sy, 16, '130,190,255', 0.2);
+      return this.tween(0.4, (k) => {
+        const w = 1 - k;
+        fx.add({ kind: 'line', x: sx, y: sy, x2: tx, y2: ty, life: 0.05, col: '160,210,255', a: 0.9 * w + 0.1 });
+        if (Math.random() < 0.6) fx.add({ kind: 'glow', x: tx + (Math.random() - 0.5) * 8, y: ty + (Math.random() - 0.5) * 8, life: 0.2, size: 8, grow: 10, col: '140,200,255', a: 0.8 });
+      }).then(() => { fx.flash(tx, ty, 26, '160,210,255', 0.25); fx.spark(tx, ty, 10, '200,230,255', 130); });
+    }
+    if (proj === 'sniper') {
+      fx.flash(sx, sy, 10, '255,240,200', 0.07);
+      fx.add({ kind: 'line', x: sx, y: sy, x2: tx, y2: ty, life: 0.18, col: '255,250,230', a: 1 });
+      return this.wait(0.12).then(() => { fx.spark(tx, ty, 5, '255,220,180', 70); fx.dust(tx, ty, 3, '170,140,110', 8, 3); });
+    }
+    if (proj === 'flame') {
+      return this.tween(0.6, (k, dt) => {
+        for (let n = 0; n < 4; n++) {
+          const f = Math.random(), x = sx + (tx - sx) * f, y = sy + (ty - sy) * f;
+          fx.add({ kind: 'glow', x: x + (Math.random() - 0.5) * 6 * f * 3, y: y + (Math.random() - 0.5) * 6 * f * 3, vx: (tx - sx) * 0.8, vy: (ty - sy) * 0.8 - 10, life: 0.35, size: 4 + f * 8, grow: 14, col: Math.random() < 0.5 ? '255,140,40' : '255,200,80', a: 0.85 });
+        }
+        if (Math.random() < 0.3) fx.smoke(tx, ty, 1, 5, 0.9);
+      }).then(() => { fx.fire(tx, ty, 8, 6); fx.decal(tx, ty, 12); });
     }
     if (proj === 'blade') {
       return this.tween(0.35, (k, dt) => {
@@ -112,7 +138,7 @@ export class Controller {
     const d = Math.hypot(tx - sx, ty - sy);
     const dur = proj === 'arty' ? 0.75 : proj === 'rocket' ? 0.18 + d / 420 : 0.1 + d / 650;
     fx.flash(sx, sy, proj === 'shell' ? 16 : 10, '255,200,120', 0.08);
-    if (proj === 'shell') fx.smoke(sx, sy, 2, 4, 0.9);
+    if (proj === 'shell') { fx.smoke(sx, sy, 2, 4, 0.9); fx.muzzle(sx, sy, Math.atan2(ty - sy, tx - sx), 1.3); fx.dust(sx, sy + 6, 3, '190,150,100', 16, 5); }
     return this.tween(dur, (k) => {
       const kk = proj === 'rocket' ? k * k : k;
       p.x = sx + (tx - sx) * kk; p.y = sy + (ty - sy) * kk;
@@ -138,7 +164,15 @@ export class Controller {
     this.kick(a, ev.proj);
     await this.shotVisual(a, t, ev.proj);
     this.hitFlash(t);
+    if (t.isUnit && t.def.shield && !ev.shieldBlast && ['bullet', 'sniper'].includes(ev.proj)) { this.fx.ring(pt.x, pt.y, 14, '140,200,255', 0.35); this.r.float(pt.x, pt.y - 30, 'Schild', '#9fd0ff'); }
+    if (ev.shieldBlast) {
+      this.fx.flash(pt.x, pt.y, 120, '200,230,255', 0.5); this.fx.ring(pt.x, pt.y, 30, '180,220,255', 0.8);
+      this.fx.explosion(pt.x, pt.y, 1.6); this.fx.shake = 12;
+      this.r.float(pt.x, pt.y - 40, 'Schildreaktion!', '#bfe4ff', true);
+      this.hitFlash(a);
+    }
     this.r.float(pt.x, pt.y - (t.isUnit && t.def.mt === 'air' ? 26 : 0), `-${Math.round(ev.dmg)}`, '#ff8a6a', ev.dmg > 40);
+    if (ev.shieldBlast && ev.counterKilled) { await this.finishKill(a, true); }
     if (ev.killed) { await this.wait(0.1); await this.finishKill(t, true); await this.wait(0.3); }
     else if (ev.counter > 0 || ev.counterKilled) {
       await this.wait(0.12);
@@ -204,6 +238,7 @@ export class Controller {
     }
     fx.explosion(p.x, p.y, 1.2);
     fx.debris(p.x, p.y, 10, '60,58,55');
+    if (e.def.turret) { const a = Math.random() * 6.28; fx.add({ kind: 'debris', x: p.x, y: p.y, vx: Math.cos(a) * 70, vy: Math.sin(a) * 70, vz: 220, life: 1.6, size: 9, col: '70,62,52', a: 1 }); fx.smoke(p.x, p.y, 6, 8, 0.95); }
     this.r.addWreck(e, p);
     e.gone = true;
   }
@@ -247,6 +282,7 @@ export class Controller {
         const b = g.get(ev.b); if (!b || !g.seen(b)) continue;
         const p = this.r.posOf(b); b.rise = 0; this.fx.dust(p.x, p.y, 14, '170,150,120', 40, 8); this.tween(0.6, (k) => { b.rise = k; });
       } else if (ev.type === 'orbital') await this.animOrbital(ev);
+      else if (ev.type === 'strike') await this.animStrike(ev);
       else if (ev.type === 'card') { if (ev.owner === 0) { this.pulse('#cardsbtn'); this.refresh(); } }
       else if (ev.type === 'income') {
         if (ev.owner === 0) { const b = g.buildings.find((x) => x.owner === 0 && x.type === 'bauhof'); if (b) { const p = center(b.c, b.r); this.r.float(p.x, p.y - 20, `+${ev.amount} Credits`, '#8ef08a'); } }
@@ -421,6 +457,62 @@ export class Controller {
     return true;
   }
 
+  async animStrike(ev) {
+    const g = this.g, p = center(ev.c, ev.r), fx = this.fx;
+    this.r.centerOn(p.x, p.y); await this.wait(0.35);
+    await this.banner('Orbitalbombardement', ev.owner === 0 ? 'Einschlag' : 'Feindlicher Einschlag', 0.6);
+    // Leitstrahl, dann Lanzen aus dem Orbit
+    await this.tween(0.6, (k) => { fx.add({ kind: 'line', x: p.x, y: p.y - 500, x2: p.x, y2: p.y, life: 0.05, col: '255,120,90', a: 0.3 + k * 0.5 }); fx.shake = Math.max(fx.shake, k * 3); });
+    const pts = ring(ev.c, ev.r, ORBITAL_STRIKE.radius, g.W, g.H).map(([c, r]) => center(c, r));
+    for (let n = 0; n < pts.length + 3; n++) {
+      const q = pts[n % pts.length], x = q.x + (Math.random() - 0.5) * 20, y = q.y + (Math.random() - 0.5) * 16;
+      await this.tween(0.12, (k) => { fx.add({ kind: 'line', x: x + 60 * (1 - k), y: y - 600 * (1 - k), x2: x, y2: y, life: 0.06, col: '255,230,190', a: 1 }); });
+      fx.explosion(x, y, 1.3); fx.flash(x, y, 70, '255,200,140', 0.3); fx.shake = 12;
+    }
+    fx.ring(p.x, p.y, 40, '255,220,180', 0.9); fx.flash(p.x, p.y, 180, '255,180,120', 0.6);
+    for (const q of pts) fx.decal(q.x, q.y, 34);
+    for (const h of ev.hits) { const e = g.byId.get(h.id); if (!e) continue; const q = this.r.posOf(e); this.r.float(q.x, q.y, `-${h.dmg}`, '#ffb070'); if (e.dead) await this.finishKill(e, true); }
+    await this.wait(0.8);
+    g.updateVision(); this.r.fogDirty = true;
+  }
+
+  async doSpecial(kind, u, b) {
+    const g = this.g;
+    const a = this.r.posOf(u), p = center(b.c, b.r);
+    const visible = u.owner === 0 || b.owner === 0 || g.seen(b);
+    if (visible) {
+      this.ensureVisible(p.x, p.y);
+      u.anim = true;
+      await this.tween(0.45, (k) => { u.vis = { x: a.x + (p.x - a.x) * k * 0.8, y: a.y + (p.y - a.y) * k * 0.8 }; u.sink = k * 0.6; });
+    }
+    let ev;
+    if (kind === 'capture') ev = g.capture(u, b);
+    else if (kind === 'repair') ev = g.repair(u, b);
+    else ev = g.infiltrate(u, b);
+    u.vis = null; u.anim = false; u.sink = 0;
+    if (kind !== 'repair') u.gone = true;
+    if (visible) {
+      if (kind === 'capture') { this.fx.ring(p.x, p.y, 16, '255,230,150', 0.7); this.hitFlash(b); this.r.float(p.x, p.y - 30, 'Übernommen!', '#ffe08a', true); }
+      else if (kind === 'repair') { this.fx.spark(p.x, p.y, 16, '160,230,255', 80); this.r.float(p.x, p.y - 30, 'Repariert', '#9fdcff'); }
+      else { for (let k = 0; k < 6; k++) setTimeout(() => { this.fx.spark(p.x + (Math.random() - 0.5) * 30, p.y + (Math.random() - 0.5) * 30, 6, '255,200,120', 80); this.fx.smoke(p.x, p.y, 2, 6, 0.9); }, k * 90); this.r.float(p.x, p.y - 30, `Infiltriert (+${ev.steal})`, '#d6a8ff', true); }
+      await this.wait(0.6);
+    }
+    g.cleanup(); g.updateVision(); this.r.fogDirty = true; this.refresh(); this.checkEnd();
+  }
+
+  async doWormCall(u, c, r) {
+    const g = this.g;
+    g.callWorm(u, c, r);
+    if (u.owner === 0 || g.seen(u)) {
+      const a = this.r.posOf(u), b = center(c, r);
+      this.ensureVisible(b.x, b.y);
+      for (let k = 0; k < 5; k++) { this.fx.ring(a.x, a.y, 6 + k * 3, '220,190,140', 0.5); await this.wait(0.12); this.fx.shake = 2; }
+      this.fx.dust(b.x, b.y, 12, '200,150,95', 30, 8);
+      this.r.float(b.x, b.y - 10, 'Der Ruf ist geschlagen', '#ffd080', true);
+      await this.wait(0.3);
+    }
+  }
+
   async doThump(u, c, r) {
     const g = this.g;
     g.thump(u, c, r);
@@ -562,7 +654,7 @@ export class Controller {
       }
       this.mode = 'moved'; this.select(this.sel); return;
     }
-    if (this.mode === 'card' || this.mode === 'orbital' || this.mode === 'voice' || this.mode === 'thump') {
+    if (['card', 'orbital', 'voice', 'thump', 'capture', 'repair', 'infiltrate', 'callworm', 'strike'].includes(this.mode)) {
       const hit = this.r.hl.target.some(([tc, tr]) => tc === c && tr === r);
       const m = this.mode; this.clearHL(); this.mode = 'idle';
       if (!hit) { this.deselect(); return; }
@@ -570,6 +662,9 @@ export class Controller {
       if (m === 'card') await this.doCard(0, this.cardIdx, c, r);
       else if (m === 'orbital') { if (g.orderDrop(0, this.dropId, c, r)) { const p = center(c, r); this.fx.ring(p.x, p.y, 10, '255,210,120', 0.6); } }
       else if (m === 'thump') await this.doThump(this.sel, c, r);
+      else if (m === 'capture' || m === 'repair' || m === 'infiltrate') { const b = g.buildingAt(c, r); if (b) await this.doSpecial(m, this.sel, b); }
+      else if (m === 'callworm') await this.doWormCall(this.sel, c, r);
+      else if (m === 'strike') { if (g.orderStrike(0, c, r)) { const p = center(c, r); this.fx.ring(p.x, p.y, 20, '255,90,70', 0.7); } }
       else if (m === 'voice') { const t = g.voiceTargets(this.sel).find((t) => t.c === c && t.r === r); if (t) await this.doVoice(this.sel, t); }
       this.busy = false; this.deselect(); this.refresh(); return;
     }
@@ -622,7 +717,8 @@ export class Controller {
     this.refresh();
     const targets = g.canFire(u) ? g.targetsFrom(u, u.c, u.r) : [];
     const carrierAct = u.def.carrier && !u.acted;
-    if (!targets.length && !carrierAct) { u.acted = true; this.deselect(); this.refresh(); return; }
+    const special = !u.acted && ((u.def.capture && (g.adjBuildings(u, true).length || g.adjBuildings(u, false).some((b) => b.hp < b.maxHp))) || (u.def.infiltrate && g.adjBuildings(u, true).length) || g.canCallWorm(u) || g.canThump(u) || g.canVoice(u));
+    if (!targets.length && !carrierAct && !special) { u.acted = true; this.deselect(); this.refresh(); return; }
     this.mode = 'moved';
     this.select(u);
   }
@@ -895,6 +991,14 @@ export class Controller {
         if (e.def.harvester) btns.push(`<button data-a="auto" class="${e.auto ? 'on' : ''}">Auto-Ernte: ${e.auto ? 'an' : 'aus'}</button>`);
         const tg = g.canFire(e) ? g.targetsFrom(e, e.c, e.r).length : 0;
         if (tg && e.moved) btns.push(`<span class="hint">${tg} Ziel${tg > 1 ? 'e' : ''} in Reichweite — rot markiert antippen</span>`);
+        if (e.def.capture && !e.acted) {
+          if (g.adjBuildings(e, true).length) btns.push('<button data-a="capture" class="purple">Übernehmen</button>');
+          if (g.adjBuildings(e, false).some((b) => b.hp < b.maxHp)) btns.push('<button data-a="repair">Reparieren</button>');
+          if (!g.adjBuildings(e, true).length && !g.adjBuildings(e, false).some((b) => b.hp < b.maxHp)) btns.push('<button disabled>Neben ein Gebäude ziehen</button>');
+        }
+        if (e.def.infiltrate && !e.acted) btns.push(g.adjBuildings(e, true).length ? '<button data-a="infiltrate" class="purple">Infiltrieren</button>' : '<button disabled>Neben feindliches Gebäude ziehen</button>');
+        if (e.def.callWorm) btns.push(g.canCallWorm(e) ? '<button data-a="callworm" class="purple">Wurm rufen</button>' : `<button disabled>Wurmruf bereit in ${e.wormCd || 0} ${e.wormCd === 1 ? 'Runde' : 'Runden'}</button>`);
+        if (e.def.stealth) btns.push(`<span class="hint">${g.stealthed(e, 1) ? 'Getarnt' : 'Sichtbar'}</span>`);
         if (e.def.thumper) btns.push(g.canThump(e) ? '<button data-a="thump" class="purple">Klopfer setzen</button>' : `<button disabled>Klopfer bereit in ${e.thumpCd || 0} ${e.thumpCd === 1 ? 'Runde' : 'Runden'}</button>`);
         if (e.def.voice) btns.push(g.canVoice(e) ? (g.voiceTargets(e).length ? '<button data-a="voice" class="purple">Stimme einsetzen</button>' : '<button disabled>Stimme: kein Ziel in 2 Feldern</button>') : `<button disabled>Stimme bereit in ${e.voiceCd || 0} ${e.voiceCd === 1 ? 'Runde' : 'Runden'}</button>`);
         if (e.stunned > 0 || e.wasStunned) btns.push('<button disabled>Gelähmt</button>');
@@ -932,7 +1036,7 @@ export class Controller {
     const isB = kind === 'bld', d = isB ? BUILDINGS[type] : UNITS[type];
     const cost = isB ? d.cost : g.unitCost(0, type);
     const ok = isB ? (g.bauhofReady(0) && g.prereqOk(0, d) && p.credits >= cost) : g.canProduce(b, type);
-    const missing = g.prereqOk(0, d) ? '' : 'Benötigt: ' + d.prereq.filter((x) => !g.has(0, x)).map((x) => BUILDINGS[x].name).join(', ');
+    const missing = g.prereqOk(0, d) ? '' : 'Benötigt: ' + (d.prereq || []).filter((x) => !g.has(0, x)).map((x) => BUILDINGS[x].name).join(', ');
     const why = ok ? '' : missing || (p.credits < cost ? 'Zu wenig Credits' : isB ? 'Bauhof hat diese Runde schon gebaut' : b.producing ? 'Produziert bereits' : p.low ? 'Energie zu niedrig' : 'Nicht verfügbar');
     box.innerHTML = `<div class="pi-head"><b>${d.name}</b><span>◈ ${cost}${isB ? ` · ${d.turns} ${d.turns === 1 ? 'Runde' : 'Runden'}` : ' · nächste Runde'}</span></div>
       ${this.profileHtml(kind, type)}
@@ -960,6 +1064,10 @@ export class Controller {
     const tags = [`Bewegung ${d.move}`, `Sicht ${d.sight}`, `Panzerung: ${CLS[d.armor] || d.armor}`];
     if (w) tags.push(`Waffe ${w.power} · Reichweite ${w.range[0] === w.range[1] ? w.range[0] : w.range.join('–')}`);
     if (d.ammo) tags.push(`Munition ${d.ammo}`);
+    if (d.faction) tags.unshift(`Exklusiv: ${FACTIONS[d.faction].name}`);
+    if (d.stealth) tags.push(d.stealth === 'sand' ? 'Getarnt im Sand' : d.stealth === 'still' ? 'Getarnt, solange still' : 'Immer getarnt');
+    if (d.shield) tags.push('Schild');
+    if (d.tough || d.elite) tags.push(`Erleidet ${Math.round((d.tough || d.elite) * 100)} % Schaden`);
     return `<div class="pi-desc">${d.desc}</div><div class="pi-tags">${tags.map((x) => `<span>${x}</span>`).join('')}</div>
       ${w ? `<div class="pi-row good"><b>Stark gegen</b> ${strong.join(', ') || '—'}</div><div class="pi-row bad"><b>Schwach gegen</b> ${weak.join(', ') || '—'}</div>` : '<div class="pi-row"><b>Unbewaffnet</b></div>'}
       ${threats.length ? `<div class="pi-row warn"><b>Gefährdet durch</b> ${threats.join(', ')}</div>` : ''}
@@ -982,6 +1090,7 @@ export class Controller {
       title = b.producing ? `In Produktion: ${UNITS[b.producing].name}` : p.low ? 'Energie zu niedrig für Produktion' : 'Produzieren (fertig nächste Runde)';
       for (const [t, d] of Object.entries(UNITS)) {
         if (d.cat !== b.def.produces) continue;
+        if (d.faction && d.faction !== p.faction) continue;
         const pre = g.prereqOk(0, d);
         const missing = pre ? '' : 'Benötigt: ' + d.prereq.filter((x) => !g.has(0, x)).map((x) => BUILDINGS[x].name).join(', ');
         items.push({ kind: 'unit', t, d, ok: g.canProduce(b, t), missing, sub: `${g.unitCost(0, t)}` });
@@ -993,7 +1102,9 @@ export class Controller {
         const cost = g.dropCost(0, id), ok = can && p.credits >= cost;
         return `<button class="drop ${ok ? '' : 'locked'}" data-a="orbital" data-t="${id}"><b>${d.name}</b><span>${d.desc}</span><em>◈ ${cost}</em></button>`;
       }).join('');
-      return `<div class="p-title">${title}</div><div class="drops">${html}</div>`;
+      const sc = p.strikeCd || 0, sok = g.canStrike(0);
+      const strike = `<div class="p-title">Orbitalbombardement</div><button class="drop ${sok ? '' : 'locked'}" data-a="strike"><b>Bombardement anfordern</b><span>Trifft das Zielfeld und alle Nachbarn zu Beginn eurer nächsten Runde: ${ORBITAL_STRIKE.unitDmg} Schaden an Einheiten, ${ORBITAL_STRIKE.bldDmg * 100} % an Gebäuden. Der Feind sieht die Zielmarkierung.${sc ? ` Bereit in ${sc} ${sc === 1 ? 'Runde' : 'Runden'}.` : ''}</span><em>◈ ${ORBITAL_STRIKE.cost}</em></button>`;
+      return `<div class="p-title">${title}</div><div class="drops">${html}</div><div class="drops">${strike}</div>`;
     } else if (b.type === 'konvent' && !items.length) {
       title = 'Ausbilden (fertig nächste Runde)';
     } else return '';
@@ -1028,6 +1139,13 @@ export class Controller {
     }
     if (a === 'prod') { this.infoSel = null; if (g.produce(e, t)) { this.flash(`${UNITS[t].name} in Auftrag gegeben`); this.refresh(); this.showPanel(e); } else this.flash('Produktion nicht möglich'); return; }
     if (a === 'cancelprod') { g.cancelProduce(e); this.refresh(); this.showPanel(e); return; }
+    if (a === 'capture' || a === 'infiltrate') { this.mode = a; this.clearHL(); this.r.hl.sel = e; this.r.hl.target = g.adjBuildings(e, true).map((b) => [b.c, b.r]); this.flash('Feindliches Gebäude antippen'); return; }
+    if (a === 'repair') { this.mode = 'repair'; this.clearHL(); this.r.hl.sel = e; this.r.hl.target = g.adjBuildings(e, false).filter((b) => b.hp < b.maxHp).map((b) => [b.c, b.r]); this.flash('Eigenes Gebäude antippen'); return; }
+    if (a === 'callworm') { this.mode = 'callworm'; this.clearHL(); this.r.hl.sel = e; this.r.hl.target = g.callWormHexes(e); this.flash('Sandfeld für den Wurm antippen (bis 5 Felder)'); return; }
+    if (a === 'strike') {
+      if (!g.canStrike(0)) { this.flash(g.players[0].credits < ORBITAL_STRIKE.cost ? 'Zu wenig Credits' : 'Bombardement noch nicht bereit'); return; }
+      this.clearHL(); this.mode = 'strike'; this.r.hl.target = g.strikeHexes(0); $('#panel').classList.remove('show'); this.flash('Zielfeld für das Bombardement antippen (trifft 7 Felder)'); return;
+    }
     if (a === 'thump') { this.mode = 'thump'; this.clearHL(); this.r.hl.sel = e; this.r.hl.target = g.thumpHexes(e); this.flash('Sandfeld für den Klopfer antippen (bis 2 Felder)'); return; }
     if (a === 'voice') { this.mode = 'voice'; this.clearHL(); this.r.hl.sel = e; this.r.hl.target = g.voiceTargets(e).map((t) => [t.c, t.r]); this.flash('Ziel für die Stimme antippen'); return; }
     if (a === 'orbital') {

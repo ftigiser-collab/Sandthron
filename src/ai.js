@@ -1,8 +1,9 @@
 // Gegner-KI und Auto-Ernter (gemeinsam genutzt)
-import { UNITS, BUILDINGS, CARDS, DROPS } from './data.js';
+import { UNITS, BUILDINGS, CARDS, DROPS, ORBITAL_STRIKE } from './data.js';
+import { ring } from './hex.js';
 import { distance, neighbors } from './hex.js';
 
-const PLAN = ['windfalle', 'raffinerie', 'kaserne', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'horst', 'ausguck', 'windfalle', 'konvent', 'turm', 'windfalle', 'kontor', 'flak', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'turm', 'flak', 'windfalle'];
+const PLAN = ['windfalle', 'raffinerie', 'kaserne', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'horst', 'ausguck', 'windfalle', 'konvent', 'turm', 'windfalle', 'kontor', 'felsenhort', 'flak', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'turm', 'flak', 'windfalle'];
 
 function value(g, e) {
   if (e.isBuilding) return e.type === 'bauhof' ? 2500 : e.def.weapon ? 900 : e.def.cost * 0.6;
@@ -142,10 +143,24 @@ export async function aiTurn(g, act, owner = 1) {
   const enemyHome = g.map.starts[enemy];
   const stage = home ? stagingHex(g, home, enemyHome) : null;
 
-  if (!g.aiPassive) aiDrop(g, owner, mode, enemyB);
+  if (!g.aiPassive) { aiDrop(g, owner, mode, enemyB); aiStrike(g, owner); }
+  // Sondereinheiten ohne Waffe: Pionier und Spion
+  for (const u of mine) {
+    if (u.dead || u.acted || u.moved || g.aiPassive) continue;
+    if (u.def.capture || u.def.infiltrate) await specialAct(g, u, act);
+  }
   const order = [...army].sort((a, b) => (g.weapon(b).range[1] - g.weapon(a).range[1]));
   for (const u of order) {
     if (u.dead || u.acted || u.moved || g.state !== 'play') continue;
+    if (g.canCallWorm(u)) {
+      let best = null, bs = 0;
+      for (const [c, r] of g.callWormHexes(u)) {
+        const around = g.units.filter((e) => !e.dead && !e.carried && e.def.mt !== 'air' && distance(e.c, e.r, c, r) <= 1);
+        const sc = around.filter((e) => e.owner !== owner).reduce((a, e) => a + value(g, e), 0) - around.filter((e) => e.owner === owner).length * 700;
+        if (sc > bs) { bs = sc; best = [c, r]; }
+      }
+      if (best && bs >= 600) { await act.callWorm(u, best[0], best[1]); continue; }
+    }
     if (g.canThump(u)) {
       // Klopfer neben feindliche Einheiten im Sand, wenn ein Wurm in Reichweite ist
       let best = null, bs = 0;
@@ -284,22 +299,31 @@ export function aiProduce(g, owner) {
     let opts = [];
     if (b.def.produces === 'veh') {
       if (refs && harvesters < Math.min(4, refs * 2) && g.prereqOk(owner, UNITS.ernter)) opts = [['ernter', 10]];
-      else opts = [['panzer', 5], ['trike', 2], ['werfer', 2]];
+      else {
+        const foeAir = g.units.filter((u) => !u.dead && u.owner !== owner && u.def.mt === 'air').length;
+        opts = [['panzer', 4], ['trike', 1], ['werfer', 2], ['laserpanzer', 2], ['koloss', 1], ['brenner', 3], ['flakwagen', foeAir ? 3 : 0]];
+      }
+    } else if (b.def.produces === 'sv') {
+      const n = (t) => g.ownUnits(owner).filter((u) => u.type === t).length;
+      opts = [['duenen', 3], ['todes', 2], ['wurmreiter', n('wurmreiter') < 1 ? 2 : 0]];
     } else if (b.def.produces === 'inf') {
       const infN = g.ownUnits(owner).filter((u) => u.def.cat === 'inf').length;
       const hasFab = g.has(owner, 'fabrik', false);
       const threatened = g.units.some((e) => !e.dead && e.owner !== owner && g.buildings.some((bb) => !bb.dead && bb.owner === owner && distance(bb.c, bb.r, e.c, e.r) <= 5));
       // Sparen für das Fahrzeugwerk, Infanterie begrenzen
       if (!threatened && ((!hasFab && p.credits < 1900) || infN >= 7 || (hasFab && g.rnd() < 0.5))) opts = [];
-      else opts = [['inf', 3], ['rak', 2], ['sandgaenger', g.ownUnits(owner).filter((u) => u.type === 'sandgaenger').length < 2 ? 1 : 0]];
+      else {
+        const n = (t) => g.ownUnits(owner).filter((u) => u.type === t).length;
+        opts = [['inf', 2], ['rak', 2], ['scharf', 2], ['schild', 2], ['schatten', 2], ['pionier', n('pionier') < 1 ? 1 : 0], ['sandgaenger', n('sandgaenger') < 2 ? 1 : 0]];
+      }
     }
     else if (b.def.produces === 'air') {
       const foeAir = g.units.filter((u) => !u.dead && u.owner !== owner && u.def.mt === 'air').length;
       const carriers = g.ownUnits(owner).filter((u) => u.def.carrier).length;
-      opts = carriers < 1 && harvesters >= 2 ? [['traeger', 10]] : [['falke', 3], ['libelle', 1], ['bomber', 2], ['jaeger', foeAir ? 3 : 0]];
-    } else if (b.def.produces === 'sis') opts = [['schwester', g.ownUnits(owner).filter((u) => u.type === 'schwester').length < 2 ? 2 : 0]];
+      opts = carriers < 1 && harvesters >= 2 ? [['traeger', 10]] : [['falke', 3], ['libelle', 1], ['bomber', 2], ['adler', 3], ['jaeger', foeAir ? 3 : 0]];
+    } else if (b.def.produces === 'sis') opts = [['schwester', g.ownUnits(owner).filter((u) => u.type === 'schwester').length < 2 ? 2 : 0], ['spion', g.ownUnits(owner).filter((u) => u.type === 'spion').length < 1 ? 2 : 0]];
     opts = opts.filter(([, w]) => w > 0);
-    opts = opts.filter(([t]) => g.prereqOk(owner, UNITS[t]) && p.credits >= g.unitCost(owner, t) + (t === 'ernter' ? 0 : reserve));
+    opts = opts.filter(([t]) => UNITS[t] && g.prereqOk(owner, UNITS[t]) && p.credits >= g.unitCost(owner, t) + (t === 'ernter' ? 0 : reserve));
     if (!opts.length) continue;
     const tot = opts.reduce((a, o) => a + o[1], 0);
     let x = g.rnd() * tot, pick = opts[0][0];
@@ -354,4 +378,43 @@ function aiDrop(g, owner, mode, enemyB) {
     if (s > bs) { bs = s; best = [c, r]; }
   }
   if (best) g.orderDrop(owner, id, best[0], best[1]);
+}
+
+// ---------- KI: Pionier und Spion ----------
+async function specialAct(g, u, act) {
+  const adj = g.adjBuildings(u, true);
+  if (adj.length) {
+    const b = adj.sort((a, b2) => value(g, b2) - value(g, a))[0];
+    if (u.def.capture) await act.capture(u, b); else await act.infiltrate(u, b);
+    return;
+  }
+  const targets = g.buildings.filter((b) => !b.dead && b.owner !== u.owner);
+  if (!targets.length) return;
+  const goal = targets.sort((a, b) => distance(a.c, a.r, u.c, u.r) - distance(b.c, b.r, u.c, u.r))[0];
+  const danger = dangerFn(g, u.owner);
+  const field = g.distanceField(u, (c, r) => danger(c, r) * 2);
+  let tc = goal.c, tr = goal.r, bd = Infinity;
+  for (const [c, r] of neighbors(goal.c, goal.r, g.W, g.H)) if (field.d[g.i(c, r)] < bd) { bd = field.d[g.i(c, r)]; tc = c; tr = r; }
+  const reach = g.reachable(u);
+  const step = g.stepToward(u, field, tc, tr, reach);
+  if (step && (step.c !== u.c || step.r !== u.r)) await act.move(u, step.c, step.r, reach);
+  if (!u.dead && !u.acted) {
+    const adj2 = g.adjBuildings(u, true);
+    if (adj2.length) { if (u.def.capture) await act.capture(u, adj2[0]); else await act.infiltrate(u, adj2[0]); }
+  }
+}
+
+// ---------- KI: Orbitalbombardement ----------
+function aiStrike(g, owner) {
+  if (!g.canStrike(owner) || g.players[owner].credits < ORBITAL_STRIKE.cost + 400) return;
+  let best = null, bs = 0;
+  for (let r = 0; r < g.H; r++) for (let c = 0; c < g.W; c++) {
+    let s = 0;
+    for (const [hc, hr] of ring(c, r, 1, g.W, g.H)) {
+      for (const u of g.units) if (!u.dead && !u.carried && u.c === hc && u.r === hr) s += u.owner === owner ? -value(g, u) * 1.5 : value(g, u) * 0.6;
+      const b = g.buildingAt(hc, hr); if (b) s += b.owner === owner ? -2000 : value(g, b) * 0.5;
+    }
+    if (s > bs) { bs = s; best = [c, r]; }
+  }
+  if (best && bs >= 1400) g.orderStrike(owner, best[0], best[1]);
 }

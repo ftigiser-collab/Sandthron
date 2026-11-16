@@ -34,6 +34,15 @@ export class FX {
   ring(x, y, size = 10, col = '255,230,190', life = 0.4) {
     this.add({ kind: 'ring', x, y, life, size, grow: size * 6, col, a: 0.7 });
   }
+  muzzle(x, y, ang, size = 1) {
+    // gerichteter Mündungsblitz mit Strahlen
+    this.add({ kind: 'glow', x: x + Math.cos(ang) * 4 * size, y: y + Math.sin(ang) * 4 * size, life: 0.07, size: 9 * size, grow: 30, col: '255,220,150', a: 1 });
+    for (let k = -1; k <= 1; k++) { const a = ang + k * 0.35; this.add({ kind: 'line', x, y, x2: x + Math.cos(a) * 14 * size * (k ? 0.6 : 1), y2: y + Math.sin(a) * 14 * size * (k ? 0.6 : 1), life: 0.06, col: '255,235,180', a: 1 }); }
+  }
+  casing(x, y, ang) {
+    const a = ang + Math.PI / 2 + (Math.random() - 0.5) * 0.6;
+    this.add({ kind: 'debris', x, y, vx: Math.cos(a) * 40, vy: Math.sin(a) * 40, vz: 50 + Math.random() * 30, life: 0.7, size: 1.3, col: '220,180,90', a: 1 });
+  }
   tracer(x1, y1, x2, y2, col = '255,230,150') {
     this.add({ kind: 'line', x: x1, y: y1, x2, y2, life: 0.07, col, a: 0.9 });
   }
