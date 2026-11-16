@@ -8,22 +8,36 @@ import { DIFFICULTY } from './data.js';
 import { center } from './hex.js';
 
 const $ = (s) => document.querySelector(s);
-let diff = 'normal';
+let diff = 'normal', faction = 'vareth';
+document.querySelectorAll('#menu [data-fac]').forEach((b) => {
+  b.onclick = () => { faction = b.dataset.fac; document.querySelectorAll('#menu [data-fac]').forEach((x) => x.classList.toggle('on', x === b)); };
+});
+let saved = null;
+try { saved = JSON.parse(localStorage.getItem('sandthron-save') || 'null'); } catch (e) { saved = null; }
+if (saved && saved.v === 2) { const c = $('#continue'); c.style.display = 'block'; c.textContent = `Fortsetzen (Runde ${saved.round})`; c.onclick = () => start(saved); }
 
 document.querySelectorAll('#menu [data-diff]').forEach((b) => {
   b.onclick = () => { diff = b.dataset.diff; document.querySelectorAll('#menu [data-diff]').forEach((x) => x.classList.toggle('on', x === b)); };
 });
 $('#start').onclick = () => start();
 
-async function start() {
+async function start(save) {
   $('#menu .loading').classList.add('show');
   $('#start').disabled = true;
   await new Promise((r) => setTimeout(r, 50));
-  const seedIn = $('#seed').value.trim();
-  const seed = seedIn ? (parseInt(seedIn, 10) || hash(seedIn)) : Math.floor(Math.random() * 1e6);
-  const map = generateMap(seed);
-  const game = new Game(map, { diff: DIFFICULTY[diff] });
-  game.setup();
+  let seed, map, game;
+  if (save) {
+    seed = save.seed; map = generateMap(seed);
+    game = Game.restore(map, save, DIFFICULTY[save.diffName || 'normal']);
+  } else {
+    const seedIn = $('#seed').value.trim();
+    seed = seedIn ? (parseInt(seedIn, 10) || hash(seedIn)) : Math.floor(Math.random() * 1e6);
+    map = generateMap(seed);
+    const foes = ['vareth', 'kordan', 'ossar'].filter((f) => f !== faction);
+    game = new Game(map, { diff: DIFFICULTY[diff], playerFaction: faction, enemyFaction: foes[Math.floor(Math.random() * foes.length)] });
+    game.diffName = diff;
+    game.setup();
+  }
   const fx = new FX();
   const renderer = new Renderer($('#game'), game, fx);
   const ctrl = new Controller(game, renderer, fx);
@@ -41,9 +55,13 @@ async function start() {
     requestAnimationFrame(loop);
   };
   requestAnimationFrame(loop);
-  game.say('Willkommen auf Sandthron. Baut eure Basis aus und erntet Glut.', 'info');
-  game.say('Tipp: Bauhof antippen, um Gebäude zu errichten.', 'info');
-  await ctrl.banner('Runde 1', 'Euer Zug', 1.2);
+  if (!save) {
+    game.say('Willkommen auf Sandthron. Baut eure Basis aus und erntet Glut.', 'info');
+    game.say('Tipp: Bauhof antippen, um Gebäude zu errichten.', 'info');
+  }
+  if (!save) ctrl.save();
+  ctrl.refresh();
+  await ctrl.banner(`Runde ${game.round}`, save ? 'Spiel fortgesetzt' : `${game.players[0].name} gegen ${game.players[1].name}`, 1.4);
 }
 
 function hash(s) { let h = 0; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) | 0; return Math.abs(h) % 1e6; }

@@ -1,5 +1,5 @@
 // Spielregeln und Zustand (rundenbasiert)
-import { UNITS, BUILDINGS, WEAPONS, ARMOR_MOD, TERRAIN, MOVE_COST, FACTIONS, START_CREDITS } from './data.js';
+import { UNITS, BUILDINGS, WEAPONS, ARMOR_MOD, TERRAIN, MOVE_COST, FACTIONS, START_CREDITS, DROPS, CARDS } from './data.js';
 import { neighbors, distance, ring, center } from './hex.js';
 const ang = (c1, r1, c2, r2) => { const a = center(c1, r1), b = center(c2, r2); return Math.atan2(b.y - a.y, b.x - a.x); };
 import { mulberry32 } from './util.js';
@@ -25,10 +25,28 @@ export class Game {
     this.log = [];
     this.state = 'play';
     this.storm = null;
+    this.thumpers = [];
+    this.revealRound = 0;
   }
   mkPlayer(id, faction) {
-    return { id, faction, name: FACTIONS[faction].name, color: FACTIONS[faction].color, credits: START_CREDITS, incomeMult: 1, powerProd: 0, powerUse: 0, low: false, stats: { kills: 0, lost: 0, harvested: 0 } };
+    return { id, faction, name: FACTIONS[faction].name, color: FACTIONS[faction].color, perk: FACTIONS[faction].perk || {}, credits: START_CREDITS, incomeMult: 1, powerProd: 0, powerUse: 0, low: false,
+      cards: [], cardRound: 0, cardTimer: 0, freeDrop: false, dropCd: 0, pendingDrops: [], stats: { kills: 0, lost: 0, harvested: 0 } };
   }
+
+  // ---------- Fraktionsboni ----------
+  unitCost(owner, type) {
+    const d = UNITS[type], pk = this.players[owner].perk;
+    return Math.round(d.cost * (d.mt === 'air' && pk.airCost ? pk.airCost : 1));
+  }
+  moveOf(u) {
+    const pk = this.players[u.owner].perk;
+    return u.def.move + (u.def.mt === 'air' && pk.airMove ? pk.airMove : 0) + (u.def.mt === 'foot' && pk.infMove ? pk.infMove : 0);
+  }
+  dropCost(owner, id) {
+    const p = this.players[owner];
+    return p.freeDrop ? 0 : Math.round(DROPS[id].cost * (p.perk.dropCost || 1));
+  }
+  active(b) { return b && !b.dead && b.turnsLeft <= 0 && !(b.sabotaged > 0); }
 
   // ---------- Aufbau ----------
   setup() {
@@ -65,6 +83,7 @@ export class Game {
   stormNext(c, r) { return this.storm && distance(c, r, this.storm.next.c, this.storm.next.r) <= this.storm.rad; }
   wormNear(c, r, d = 3) { return this.worms.some((w) => distance(c, r, w.c, w.r) <= d); }
   has(owner, type, done = true) { return this.buildings.some((b) => !b.dead && b.owner === owner && b.type === type && (!done || b.turnsLeft <= 0)); }
+  hasActive(owner, type) { return this.buildings.some((b) => b.owner === owner && b.type === type && this.active(b)); }
   count(owner, type) { return this.buildings.filter((b) => !b.dead && b.owner === owner && b.type === type && b.turnsLeft <= 0).length; }
   prereqOk(owner, def) { return !def.prereq || def.prereq.every((t) => this.has(owner, t)); }
   ownUnits(o) { return this.units.filter((u) => !u.dead && u.owner === o); }
@@ -77,7 +96,8 @@ export class Game {
   }
   addBuilding(owner, type, c, r, instant = false) {
     const def = BUILDINGS[type];
-    const b = { id: NEXT++, isBuilding: true, owner, type, def, c, r, hp: def.hp, maxHp: def.hp, turnsLeft: instant ? 0 : def.turns, producing: null, acted: false, usedRound: 0, facing: owner === 0 ? 0.8 : 3.9, rise: instant ? 1 : 0 };
+    const hpM = this.players[owner].perk.bldHp || 1;
+    const b = { id: NEXT++, isBuilding: true, owner, type, def, c, r, hp: Math.round(def.hp * hpM), maxHp: Math.round(def.hp * hpM), turnsLeft: instant ? 0 : def.turns, producing: null, acted: false, usedRound: 0, facing: owner === 0 ? 0.8 : 3.9, rise: instant ? 1 : 0 };
     this.buildings.push(b); this.byId.set(b.id, b);
     this.updatePower();
     return b;
@@ -88,7 +108,7 @@ export class Game {
     for (const p of this.players) {
       let prod = 0, use = 0;
       for (const b of this.buildings) {
-        if (b.dead || b.owner !== p.id || b.turnsLeft > 0) continue;
+        if (b.dead || b.owner !== p.id || b.turnsLeft > 0 || b.sabotaged > 0) continue;
         if (b.def.power > 0) prod += b.def.power * (b.hp < b.maxHp * 0.5 ? 0.5 : 1); else use -= b.def.power;
       }
       const was = p.low;
@@ -109,7 +129,7 @@ export class Game {
     return false;
   }
 
-  reachable(u, budget = u.def.move) {
+  reachable(u, budget = this.moveOf(u)) {
     const res = new Map();
     const key = (c, r) => r * this.W + c;
     res.set(key(u.c, u.r), { c: u.c, r: u.r, cost: 0, prev: null });
@@ -198,7 +218,8 @@ export class Game {
     const w = this.weapon(u); if (!w || u.acted || u.carried) return false;
     if (w.noMoveFire && u.moved) return false;
     if (w.ammo && u.ammo <= 0) return false;
-    if (u.isBuilding && (u.turnsLeft > 0 || this.players[u.owner].low)) return false;
+    if (u.isBuilding && (u.turnsLeft > 0 || this.players[u.owner].low || u.sabotaged > 0)) return false;
+    if (u.stunned > 0 && u.owner === this.current) return false;
     return true;
   }
 
@@ -225,6 +246,8 @@ export class Game {
     const hpF = att.isBuilding ? 1 : 0.35 + 0.65 * (attHp / 100);
     const def = t.isBuilding || this.isAir(t) ? 0 : TERRAIN[this.terr(t.c, t.r)].def;
     let dmg = w.power * mod * hpF * (1 - def);
+    if (att.isUnit && att.def.cat === 'veh') dmg *= this.players[att.owner].perk.vehPower || 1;
+    if (t.shield > 0) dmg *= 0.5;
     if (t.isBuilding) dmg = dmg * t.maxHp / 100; // Gebäude-TP skalieren
     return dmg;
   }
@@ -245,7 +268,7 @@ export class Game {
 
   canCounter(t, att, ac = att.c, ar = att.r) {
     const w = this.weapon(t); if (!w || w.noCounter || !this.canHit(w, att)) return false;
-    if (t.isBuilding && (t.turnsLeft > 0 || this.players[t.owner].low)) return false;
+    if (t.isBuilding && (t.turnsLeft > 0 || this.players[t.owner].low || t.sabotaged > 0)) return false;
     if (w.ammo && t.ammo <= 0) return false;
     return this.inRange(w, t.c, t.r, ac, ar);
   }
@@ -311,15 +334,15 @@ export class Game {
   }
   canProduce(b, type) {
     const def = UNITS[type], p = this.players[b.owner];
-    return b.turnsLeft <= 0 && !b.producing && b.def.produces === def.cat && this.prereqOk(b.owner, def) && p.credits >= def.cost && !p.low;
+    return this.active(b) && !b.producing && b.def.produces === def.cat && this.prereqOk(b.owner, def) && p.credits >= this.unitCost(b.owner, type) && !p.low;
   }
   produce(b, type) {
     if (!this.canProduce(b, type)) return false;
-    this.players[b.owner].credits -= UNITS[type].cost;
-    b.producing = type;
+    this.players[b.owner].credits -= this.unitCost(b.owner, type);
+    b.producing = type; b.paid = this.unitCost(b.owner, type);
     return true;
   }
-  cancelProduce(b) { if (b.producing) { this.players[b.owner].credits += UNITS[b.producing].cost; b.producing = null; } }
+  cancelProduce(b) { if (b.producing) { this.players[b.owner].credits += b.paid ?? UNITS[b.producing].cost; b.producing = null; } }
 
   spawnNear(owner, type, c, r) {
     const air = UNITS[type].mt === 'air';
@@ -344,26 +367,125 @@ export class Game {
         b.turnsLeft--;
         if (b.turnsLeft === 0) {
           this.say(`${b.def.name} fertig`, 'good', owner);
+          if (b.type === 'konvent') { const c = this.drawCard(owner); if (c) ev.push({ type: 'card', owner, card: c }); }
           ev.push({ type: 'built', b: b.id });
           if (b.def.freeUnit) { const u = this.spawnNear(owner, b.def.freeUnit, b.c, b.r); if (u) ev.push({ type: 'spawn', u: u.id, from: b.id }); }
         }
       }
+      if (b.sabotaged > 0) { b.sabotaged--; if (b.sabotaged > 0 || b.producing) { if (b.producing) this.say(`${b.def.name}: Produktion durch Sabotage verzögert`, 'warn', owner); continue; } }
       if (b.producing && b.turnsLeft <= 0) {
         const u = this.spawnNear(owner, b.producing, b.c, b.r);
         if (u) { ev.push({ type: 'spawn', u: u.id, from: b.id }); this.say(`${u.def.name} bereit`, 'good', owner); b.producing = null; }
         else this.say(`${b.def.name}: kein Platz zum Ausrücken`, 'warn', owner);
       }
     }
+    // Orbital-Drops landen
+    const p = this.players[owner];
+    if (p.dropCd > 0) p.dropCd--;
+    for (const d of p.pendingDrops) {
+      const ids = [];
+      for (const t of DROPS[d.id].units) { const u = this.spawnNear(owner, t, d.c, d.r); if (u) { u.dropped = true; ids.push(u.id); } }
+      ev.push({ type: 'orbital', owner, c: d.c, r: d.r, units: ids });
+      this.say(`Orbital-Drop gelandet: ${DROPS[d.id].name}`, 'good', owner);
+    }
+    p.pendingDrops = [];
+    // Intrigenkarten
+    if (this.hasActive(owner, 'konvent')) {
+      p.cardTimer++;
+      if (p.cardTimer >= 3) { p.cardTimer = 0; const c = this.drawCard(owner); if (c) ev.push({ type: 'card', owner, card: c }); }
+    }
     for (const u of this.units) {
       if (u.dead || u.owner !== owner) continue;
       u.moved = false; u.acted = false; u.harvested = false;
+      if (u.voiceCd > 0) u.voiceCd--;
+      if (u.shield > 0) u.shield--;
+      if (u.stunned > 0) { u.stunned--; u.moved = true; u.acted = true; u.wasStunned = true; } else u.wasStunned = false;
       if (u.def.ammo && u.ammo < u.def.ammo) {
         const h = this.buildings.find((b) => !b.dead && b.owner === owner && b.type === 'horst' && b.turnsLeft <= 0 && distance(b.c, b.r, u.c, u.r) <= 1);
         if (h) { u.ammo = u.def.ammo; ev.push({ type: 'rearm', u: u.id }); }
       }
     }
+    for (const b of this.buildings) if (!b.dead && b.owner === owner && b.shield > 0) b.shield--;
     this.updatePower();
     return ev;
+  }
+
+  // ---------- Intrigenkarten ----------
+  drawCard(owner) {
+    const p = this.players[owner];
+    if (p.cards.length >= 5) return null;
+    const ids = Object.keys(CARDS), tot = ids.reduce((a, k) => a + CARDS[k].weight, 0);
+    let x = this.rnd() * tot;
+    for (const k of ids) { x -= CARDS[k].weight; if (x <= 0) { p.cards.push(k); if (owner === 0) this.say(`Neue Intrigenkarte: ${CARDS[k].name}`, 'good'); return k; } }
+    p.cards.push(ids[0]); return ids[0];
+  }
+  canPlayCard(owner) { return this.players[owner].cardRound !== this.round && this.current === owner; }
+  cardTargets(owner, id) {
+    const foe = 1 - owner, vis = (c, r) => owner !== 0 || this.visible[this.i(c, r)];
+    const t = CARDS[id].target;
+    if (t === 'enemyUnit') return this.units.filter((u) => !u.dead && !u.carried && u.owner === foe && vis(u.c, u.r)).map((u) => [u.c, u.r]);
+    if (t === 'enemyInf') return this.units.filter((u) => !u.dead && !u.carried && u.owner === foe && u.def.mt === 'foot' && vis(u.c, u.r)).map((u) => [u.c, u.r]);
+    if (t === 'enemyBld') return this.buildings.filter((b) => !b.dead && b.owner === foe && (owner !== 0 || this.explored[this.i(b.c, b.r)])).map((b) => [b.c, b.r]);
+    if (t === 'own') return [...this.units.filter((u) => !u.dead && !u.carried && u.owner === owner).map((u) => [u.c, u.r]), ...this.buildings.filter((b) => !b.dead && b.owner === owner).map((b) => [b.c, b.r])];
+    if (t === 'sandHex') { const out = []; for (let r = 0; r < this.H; r++) for (let c = 0; c < this.W; c++) if (this.isSand(c, r) && (owner !== 0 || this.explored[this.i(c, r)])) out.push([c, r]); return out; }
+    if (t === 'stormHex') return ring(this.storm.next.c, this.storm.next.r, 4, this.W, this.H).filter(([c, r]) => c >= 1 && r >= 1 && c < this.W - 1 && r < this.H - 1);
+    return [];
+  }
+  playCard(owner, idx, c, r) {
+    const p = this.players[owner], id = p.cards[idx];
+    if (!id || !this.canPlayCard(owner)) return null;
+    const card = CARDS[id];
+    if (card.target !== 'none' && !this.cardTargets(owner, id).some(([a, b]) => a === c && b === r)) return null;
+    const foe = 1 - owner;
+    const ev = { type: 'cardplay', owner, card: id, c, r };
+    if (id === 'stimme') { const u = this.unitAt(c, r, true) && this.unitAt(c, r, true).owner === foe ? this.unitAt(c, r, true) : this.unitAt(c, r, false); u.stunned = 1; ev.target = u.id; }
+    else if (id === 'vorahnung') { if (owner === 0) this.revealRound = this.round; }
+    else if (id === 'wetter') { this.storm.next = { c, r, dir: this.storm.next.dir }; }
+    else if (id === 'klopfer') { this.thumpers.push({ c, r, owner, life: 2 }); }
+    else if (id === 'verrat') { const u = this.unitAt(c, r, false); u.owner = owner; u.moved = true; u.acted = true; u.auto = !!u.def.harvester; ev.target = u.id; }
+    else if (id === 'schild') { const e = this.unitAt(c, r, true)?.owner === owner ? this.unitAt(c, r, true) : this.unitAt(c, r, false)?.owner === owner ? this.unitAt(c, r, false) : this.buildingAt(c, r); e.shield = 2; ev.target = e.id; }
+    else if (id === 'sabotage') { const b = this.buildingAt(c, r); b.sabotaged = 1; ev.target = b.id; this.updatePower(); }
+    else if (id === 'gilde') { p.freeDrop = true; }
+    p.cards.splice(idx, 1); p.cardRound = this.round;
+    if (owner === 0) this.say(`Intrige gespielt: ${card.name}`, 'good');
+    else this.say(`Der Feind spielt eine Intrige: ${card.name}`, 'warn');
+    this.updateVision();
+    return ev;
+  }
+
+  // ---------- Orbital-Drops ----------
+  canDrop(owner) {
+    const p = this.players[owner];
+    return this.hasActive(owner, 'kontor') && !p.low && p.dropCd <= 0 && this.current === owner;
+  }
+  orbitalHexes(owner) {
+    const out = [];
+    for (let r = 0; r < this.H; r++) for (let c = 0; c < this.W; c++) {
+      if (owner === 0 && !this.explored[this.i(c, r)]) continue;
+      if (this.terr(c, r) === 'mountain' || this.inStorm(c, r) || !this.groundFree(c, r)) continue;
+      if (this.buildings.some((b) => !b.dead && b.owner !== owner && distance(b.c, b.r, c, r) <= 1)) continue;
+      out.push([c, r]);
+    }
+    return out;
+  }
+  orderDrop(owner, id, c, r) {
+    const p = this.players[owner], cost = this.dropCost(owner, id);
+    if (!this.canDrop(owner) || p.credits < cost) return false;
+    if (!this.orbitalHexes(owner).some(([a, b]) => a === c && b === r)) return false;
+    p.credits -= cost; p.freeDrop = false; p.dropCd = 2;
+    p.pendingDrops.push({ id, c, r });
+    if (owner === 0) this.say(`Gilde bestätigt: ${DROPS[id].name} landet nächste Runde`, 'good');
+    return true;
+  }
+
+  // ---------- Schwester ----------
+  canVoice(u) { return u.def.voice && !(u.voiceCd > 0) && !u.acted && u.owner === this.current; }
+  voiceTargets(u) {
+    return this.units.filter((t) => !t.dead && !t.carried && t.owner !== u.owner && distance(u.c, u.r, t.c, t.r) <= 2 && (u.owner !== 0 || this.visible[this.i(t.c, t.r)]));
+  }
+  voice(u, t) {
+    t.stunned = 1; u.voiceCd = 3; u.acted = true; u.moved = true;
+    return { type: 'voice', u: u.id, t: t.id };
   }
 
   // Rundenende eines Spielers: Abwehr feuert, Ernter ernten/entladen
@@ -399,7 +521,8 @@ export class Game {
     for (const u of this.units) {
       if (u.dead || u.owner !== owner || u.carried || u.def.mt === 'air' || !this.isSand(u.c, u.r)) { if (!u.dead) u.vib = 0; continue; }
       const veh = u.def.cat === 'veh';
-      u.vib = u.harvested ? 3 : u.moved ? (veh ? 2 : 1) : (veh ? 0.6 : 0.15);
+      u.vib = u.harvested ? 3 : u.dropped ? 2.5 : u.moved ? (veh ? 2 : 1) : (veh ? 0.6 : 0.15);
+      u.dropped = false;
     }
     return ev;
   }
@@ -467,8 +590,9 @@ export class Game {
     ev.push({ type: 'storm', from, to: { c: s.c, r: s.r }, hits });
     if (hits.some((h) => { const e = this.byId.get(h.id); return e && e.owner === 0; })) this.say('Der Sturm trifft eure Einheiten!', 'bad');
 
-    // 2. Würmer
+    // 2. Würmer (Klopfer locken zuerst)
     for (const w of this.worms) ev.push(...this.wormTurn(w));
+    this.thumpers = this.thumpers.filter((t) => !t.used && --t.life > 0);
 
     // 3. Glutausbruch
     if (this.round % 4 === 0) {
@@ -504,6 +628,26 @@ export class Game {
   wormTurn(w) {
     const ev = [];
     const sandPass = (c, r) => this.isSand(c, r) && !this.buildingAt(c, r);
+    const th = this.thumpers.filter((t) => !t.used && distance(w.c, w.r, t.c, t.r) <= 12).sort((a, b) => distance(w.c, w.r, a.c, a.r) - distance(w.c, w.r, b.c, b.r))[0];
+    if (th) {
+      const route = this.sandRoute(w.c, w.r, th.c, th.r, sandPass);
+      if (route) {
+        const steps = route.slice(1, 9), path = [{ c: w.c, r: w.r }, ...steps];
+        const last = steps[steps.length - 1] || { c: w.c, r: w.r };
+        w.c = last.c; w.r = last.r;
+        if (last.c === th.c && last.r === th.r) {
+          th.used = true; w.sated = 2;
+          const eaten = this.units.filter((u) => !u.dead && !u.carried && u.def.mt !== 'air' && this.isSand(u.c, u.r) && distance(u.c, u.r, th.c, th.r) <= 1);
+          for (const u of eaten) this.kill(u);
+          ev.push({ type: 'worm', id: w.id, path, eatMany: eaten.map((u) => u.id), thumper: true });
+          if (eaten.some((u) => u.owner === 1)) this.say(`Der Klopfer hat einen Wurm angelockt — ${eaten.filter((u) => u.owner === 1).length} feindliche Einheiten verschlungen!`, 'good');
+          if (eaten.some((u) => u.owner === 0)) this.say('Ein Wurm folgte einem Klopfer und verschlang eure Einheiten!', 'bad');
+          return ev;
+        }
+        ev.push({ type: 'worm', id: w.id, path });
+        return ev;
+      }
+    }
     let best = null, bs = 0;
     if (w.sated <= 0) {
       for (const u of this.units) {
@@ -563,6 +707,19 @@ export class Game {
     return ev;
   }
 
+  sandRoute(sc, sr, tc, tr, pass) {
+    const key = (c, r) => r * this.W + c, prev = new Map([[key(sc, sr), null]]), q = [[sc, sr]];
+    while (q.length) {
+      const [c, r] = q.shift();
+      if (c === tc && r === tr) break;
+      for (const [nc, nr] of neighbors(c, r, this.W, this.H)) { const k = key(nc, nr); if (prev.has(k) || !pass(nc, nr)) continue; prev.set(k, key(c, r)); q.push([nc, nr]); }
+    }
+    if (!prev.has(key(tc, tr))) return null;
+    const out = []; let k = key(tc, tr);
+    while (k !== null) { out.push({ c: k % this.W, r: Math.floor(k / this.W) }); k = prev.get(k); }
+    return out.reverse();
+  }
+
   wormSeen(w) { return !!(this.visible[this.i(w.c, w.r)] || this.radar[this.i(w.c, w.r)]); }
 
   // ---------- Tageszeit ----------
@@ -578,6 +735,7 @@ export class Game {
       reveal(b.c, b.r, b.def.sight);
       if (b.def.radar && b.turnsLeft <= 0 && !this.players[0].low) reveal(b.c, b.r, 9, this.radar);
     }
+    if (this.revealRound === this.round) this.visible.fill(1);
     for (let k = 0; k < this.visible.length; k++) if (this.visible[k]) this.explored[k] = 1;
   }
   seen(e) {
@@ -591,6 +749,29 @@ export class Game {
     if (!alive(1)) this.state = 'won';
     else if (!alive(0) && !this.units.some((u) => !u.dead && u.owner === 0)) this.state = 'lost';
     return this.state;
+  }
+
+  // ---------- Speichern ----------
+  serialize() {
+    const strip = (o) => { const c = { ...o }; delete c.def; delete c.vis; delete c.anim; delete c.gone; delete c.hitFlash; delete c.recoil; delete c.forceShow; delete c.surface; delete c.crashing; delete c.aimUntil; return c; };
+    return JSON.stringify({ v: 2, seed: this.map.seed, ter: this.map.ter, spice: Array.from(this.map.spice), round: this.round, current: this.current,
+      players: this.players, units: this.units.filter((u) => !u.dead).map(strip), buildings: this.buildings.filter((b) => !b.dead).map(strip),
+      worms: this.worms.map(strip), storm: { c: this.storm.c, r: this.storm.r, rad: this.storm.rad, dir: this.storm.dir, next: this.storm.next },
+      thumpers: this.thumpers, explored: Array.from(this.explored).join(''), revealRound: this.revealRound, aiMode: this.aiMode, diffName: this.diffName });
+  }
+  static restore(map, data, diff) {
+    map.ter = data.ter; map.spice = Float32Array.from(data.spice);
+    const g = new Game(map, { diff });
+    g.diffName = data.diffName; g.round = data.round; g.current = 0; g.aiMode = data.aiMode; g.revealRound = data.revealRound;
+    g.players = data.players.map((p) => ({ ...p, perk: FACTIONS[p.faction].perk || {} }));
+    g.units = data.units.map((u) => ({ ...u, def: UNITS[u.type] }));
+    g.buildings = data.buildings.map((b) => ({ ...b, def: BUILDINGS[b.type], rise: 1 }));
+    g.worms = data.worms; g.storm = data.storm; g.thumpers = data.thumpers || [];
+    for (const e of [...g.units, ...g.buildings, ...g.worms]) { g.byId.set(e.id, e); NEXT = Math.max(NEXT, e.id + 1); }
+    for (let k = 0; k < data.explored.length; k++) g.explored[k] = data.explored.charCodeAt(k) === 49 ? 1 : 0;
+    g.rnd = mulberry32(map.seed * 7 + data.round * 131);
+    g.updatePower(); g.updateVision();
+    return g;
   }
 
   cleanup() {

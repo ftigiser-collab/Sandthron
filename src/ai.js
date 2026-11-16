@@ -1,8 +1,8 @@
 // Gegner-KI und Auto-Ernter (gemeinsam genutzt)
-import { UNITS, BUILDINGS } from './data.js';
+import { UNITS, BUILDINGS, CARDS, DROPS } from './data.js';
 import { distance, neighbors } from './hex.js';
 
-const PLAN = ['windfalle', 'raffinerie', 'kaserne', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'ausguck', 'windfalle', 'turm', 'horst', 'flak', 'windfalle', 'fabrik', 'turm', 'windfalle', 'raffinerie', 'turm', 'flak', 'windfalle'];
+const PLAN = ['windfalle', 'raffinerie', 'kaserne', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'ausguck', 'windfalle', 'konvent', 'turm', 'horst', 'windfalle', 'kontor', 'flak', 'windfalle', 'fabrik', 'turm', 'raffinerie', 'turm', 'flak', 'windfalle'];
 
 function value(g, e) {
   if (e.isBuilding) return e.type === 'bauhof' ? 2500 : e.def.weapon ? 900 : e.def.cost * 0.6;
@@ -65,6 +65,7 @@ export async function aiTurn(g, act, owner = 1) {
   const enemy = 1 - owner;
   aiBuild(g, owner);
   aiProduce(g, owner);
+  await aiCards(g, act, owner);
 
   const mine = g.ownUnits(owner);
   const myB = g.buildings.filter((b) => !b.dead && b.owner === owner);
@@ -81,9 +82,14 @@ export async function aiTurn(g, act, owner = 1) {
   const enemyHome = g.map.starts[enemy];
   const stage = home ? stagingHex(g, home, enemyHome) : null;
 
+  aiDrop(g, owner, mode, enemyB);
   const order = [...army].sort((a, b) => (g.weapon(b).range[1] - g.weapon(a).range[1]));
   for (const u of order) {
-    if (u.dead || g.state !== 'play') continue;
+    if (u.dead || u.acted || u.moved || g.state !== 'play') continue;
+    if (g.canVoice(u)) {
+      const ts = g.voiceTargets(u).sort((a, b) => value(g, b) - value(g, a));
+      if (ts.length && value(g, ts[0]) >= 300) { await act.voice(u, ts[0]); continue; }
+    }
     await unitAct(g, u, act, mode, { threats, enemyB, enemyU, stage, home });
   }
   for (const u of mine) if (u.def.harvester && !u.dead) await autoHarvest(g, u, act);
@@ -207,12 +213,64 @@ export function aiProduce(g, owner) {
       if (refs && harvesters < Math.min(4, refs + 1) && g.prereqOk(owner, UNITS.ernter)) opts = [['ernter', 10]];
       else opts = [['panzer', 5], ['trike', 2], ['werfer', 2]];
     } else if (b.def.produces === 'inf') opts = [['inf', 3], ['rak', 2]];
-    else if (b.def.produces === 'air') opts = [['falke', 3], ['libelle', 2]];
-    opts = opts.filter(([t]) => g.prereqOk(owner, UNITS[t]) && p.credits >= UNITS[t].cost + (t === 'ernter' ? 0 : reserve));
+    else if (b.def.produces === 'air') {
+      const foeAir = g.units.filter((u) => !u.dead && u.owner !== owner && u.def.mt === 'air').length;
+      opts = [['falke', 3], ['libelle', 1], ['bomber', 2], ['jaeger', foeAir ? 3 : 0]];
+    } else if (b.def.produces === 'sis') opts = [['schwester', g.ownUnits(owner).filter((u) => u.type === 'schwester').length < 2 ? 2 : 0]];
+    opts = opts.filter(([, w]) => w > 0);
+    opts = opts.filter(([t]) => g.prereqOk(owner, UNITS[t]) && p.credits >= g.unitCost(owner, t) + (t === 'ernter' ? 0 : reserve));
     if (!opts.length) continue;
     const tot = opts.reduce((a, o) => a + o[1], 0);
     let x = g.rnd() * tot, pick = opts[0][0];
     for (const [t, wgt] of opts) { x -= wgt; if (x <= 0) { pick = t; break; } }
     g.produce(b, pick);
   }
+}
+
+// ---------- KI: Intrigen ----------
+async function aiCards(g, act, owner) {
+  const p = g.players[owner];
+  if (!p.cards.length || !g.canPlayCard(owner)) return;
+  const foe = 1 - owner;
+  const myB = g.buildings.filter((b) => !b.dead && b.owner === owner);
+  const foeU = g.units.filter((u) => !u.dead && !u.carried && u.owner === foe);
+  const near = (e, d) => myB.some((b) => distance(b.c, b.r, e.c, e.r) <= d);
+  for (let i = 0; i < p.cards.length; i++) {
+    const id = p.cards[i];
+    let tgt = null;
+    if (id === 'gilde') tgt = [0, 0];
+    else if (id === 'stimme') { const u = foeU.filter((u) => near(u, 7)).sort((a, b) => value(g, b) - value(g, a))[0]; if (u && value(g, u) >= 350) tgt = [u.c, u.r]; }
+    else if (id === 'klopfer') { const h = foeU.find((u) => u.def.harvester && g.isSand(u.c, u.r)) || foeU.filter((u) => g.isSand(u.c, u.r) && u.def.mt !== 'air').sort((a, b) => value(g, b) - value(g, a))[0]; if (h && g.worms.some((w) => distance(w.c, w.r, h.c, h.r) <= 12)) tgt = [h.c, h.r]; }
+    else if (id === 'sabotage') { const b = g.buildings.find((b) => !b.dead && b.owner === foe && ['fabrik', 'horst', 'windfalle'].includes(b.type)); if (b) tgt = [b.c, b.r]; }
+    else if (id === 'verrat') { const u = foeU.filter((u) => u.def.mt === 'foot').sort((a, b) => value(g, b) - value(g, a))[0]; if (u) tgt = [u.c, u.r]; }
+    else if (id === 'schild') { const threatened = foeU.some((u) => near(u, 5)); const bh = myB.find((b) => b.type === 'bauhof'); if (threatened && bh) tgt = [bh.c, bh.r]; }
+    else if (id === 'wetter') {
+      let best = null, bs = 0;
+      for (const [c, r] of g.cardTargets(owner, 'wetter')) { const s = foeU.filter((u) => distance(u.c, u.r, c, r) <= 2 && u.def.mt !== 'mountain').length - myB.filter((b) => distance(b.c, b.r, c, r) <= 2).length * 2; if (s > bs) { bs = s; best = [c, r]; } }
+      if (best && bs >= 2) tgt = best;
+    } else if (id === 'vorahnung' && p.cards.length >= 5) tgt = [0, 0];
+    if (tgt) { await act.card(owner, i, tgt[0], tgt[1]); return; }
+  }
+}
+
+// ---------- KI: Orbital-Drops ----------
+function aiDrop(g, owner, mode, enemyB) {
+  if (!g.canDrop(owner)) return;
+  const p = g.players[owner];
+  const harvesters = g.ownUnits(owner).filter((u) => u.def.harvester).length;
+  let id = mode === 'attack' ? (g.rnd() < 0.5 ? 'panzer' : 'elite') : harvesters < 2 ? 'ernter' : 'trupp';
+  if (p.credits < g.dropCost(owner, id) + 400) { id = 'trupp'; if (p.credits < g.dropCost(owner, id) + 400) return; }
+  const hexes = g.orbitalHexes(owner);
+  const home = g.map.starts[owner], foeHome = g.map.starts[1 - owner];
+  let best = null, bs = -Infinity;
+  for (const [c, r] of hexes) {
+    let s;
+    if (id === 'ernter') { s = g.spiceAt(c, r) > 0 ? 20 - distance(c, r, home.c, home.r) : -99; }
+    else if (mode === 'attack') { const d = Math.min(...enemyB.filter((b) => !b.dead).map((b) => distance(b.c, b.r, c, r)), 99); s = d >= 2 && d <= 4 ? 20 - d : -d; }
+    else s = -Math.abs(distance(c, r, home.c, home.r) - 3) - distance(c, r, foeHome.c, foeHome.r) * 0.1;
+    if (g.isSand(c, r)) s -= 3;
+    s += g.rnd();
+    if (s > bs) { bs = s; best = [c, r]; }
+  }
+  if (best) g.orderDrop(owner, id, best[0], best[1]);
 }

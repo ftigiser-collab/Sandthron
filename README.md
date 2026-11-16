@@ -14,9 +14,19 @@ Rundenstrategie auf Hexfeldern, angelehnt an Dune 2000 und das Dune-Brettspiel, 
 - Gegner-KI mit Bauplan, Produktion, Sammeln, Angriffswellen, Verteidigung
 - Nebel des Krieges, Minikarte, Hilfe-Seite
 
+## Stufe 2
+- Animationen: Zielen und Rückstoß, Trefferblitz, Wracks, Trümmer, Thopter-Absturz, Ausrücken, Entladestrom, Bau-Funken, Sturm-Blitze, Drop-Kapseln
+- Tag-Nacht-Zyklus (nachts Bodensicht −1, Lichter)
+- Gildenkontor mit Orbital-Drops (Söldnertrupp, Gilden-Söldner, Panzer, Ernter)
+- Konvent mit 8 Intrigenkarten (Stimme, Vorahnung, Wetterkunde, Klopfer, Verrat, Schildwall, Sabotage, Gildenschuld) und der Verhüllten Schwester
+- Bomber- und Abfang-Thopter
+- Drei Fraktionen mit eigenem Bonus
+- Autosave und Fortsetzen
+- KI nutzt Karten, Drops und die neuen Einheiten
+
 ## Geplant
-- **Stufe 2:** Meta-Ebene: Schwesternschaft (Intrigenkarten), Gilde der Leere (Orbital-Drops), dritte Fraktion, mehr Thopter (Bomber, Abfangjäger), Wurm-Köder, Speichern
-- **Stufe 3:** Kampagne mit Missionen und Briefings, Sound, Balancing
+- **Stufe 3:** Kampagne mit Missionen und Briefings, Balancing
+- **Später:** Sound und Musik
 
 ## Technik
 Reines HTML/JavaScript (ES-Module), Canvas 2D, keine Abhängigkeiten. Alle Grafiken entstehen per Code.

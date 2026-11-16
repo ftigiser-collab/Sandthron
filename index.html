@@ -24,6 +24,7 @@
     <div class="stat dt"><span class="lbl">Tageszeit</span><b id="daytime">Morgen</b></div>
     <div class="spacer"></div>
     <button id="helpbtn" title="Hilfe">?</button>
+    <button id="cardsbtn">Intrigen (0)</button>
     <button id="nextunit">Nächste Einheit</button>
     <button id="endturn" class="primary">Runde beenden</button>
   </header>
@@ -66,10 +67,16 @@
         <li><b>Gegenschlag:</b> Wer angreift, wird zurückbeschossen, wenn der Gegner in Reichweite ist. Raketenwerfer feuern aus der Ferne ohne Gegenschlag.</li>
         <li><b>Tageszeit:</b> Morgen, Tag, Abend, Nacht wechseln mit den Runden. Nachts sehen Bodeneinheiten ein Feld weniger weit.</li>
         <li><b>Deckung:</b> Dünen 10 %, Fels 15 %, Gebirge 35 % weniger Schaden.</li>
+        <li><b>Gildenkontor:</b> Orbital-Drops auf jedes bekannte Feld, landen in der nächsten Runde. Ein Drop alle 2 Runden.</li>
+        <li><b>Konvent:</b> Alle 3 Runden eine Intrigenkarte, eine Karte pro Runde spielbar. Der Klopfer lockt Würmer an — auch auf feindliche Ernter. Verhüllte Schwestern können mit der Stimme lähmen.</li>
+        <li><b>Fraktionen:</b> Jedes Haus hat einen eigenen Bonus (Auswahl im Startmenü).</li>
+        <li><b>Speichern:</b> Das Spiel speichert zu Beginn jeder eurer Runden automatisch. Im Startmenü auf „Fortsetzen“.</li>
         <li><b>Sieg:</b> Alle gegnerischen Gebäude zerstören.</li>
       </ul>
     </div>
   </div>
+
+  <div id="cards"></div>
 
   <div id="endscreen">
     <h1>Ende</h1>
@@ -82,6 +89,12 @@
       <div class="m-title">SANDTHRON</div>
       <div class="m-sub">Rundenstrategie auf einem Wüstenplaneten</div>
       <p class="m-text">Haus Vareth gegen Haus Kordan. Erntet Glut, baut eure Basis, beherrscht den Himmel mit Ornithoptern und hütet euch vor dem, was unter dem Sand lauert.</p>
+      <div class="m-label">Fraktion</div>
+      <div class="m-fac">
+        <button data-fac="vareth" class="on" style="--c:#3fa8ff"><b>Haus Vareth</b><span>Thopter 15 % günstiger, +1 Bewegung</span></button>
+        <button data-fac="kordan" style="--c:#ff4a3a"><b>Haus Kordan</b><span>Fahrzeuge +12 % Schaden, Gebäude +20 % stabiler</span></button>
+        <button data-fac="ossar" style="--c:#5fe07a"><b>Ossar-Syndikat</b><span>Infanterie +1 Bewegung, Drops 30 % günstiger</span></button>
+      </div>
       <div class="m-label">Schwierigkeit</div>
       <div class="m-diff">
         <button data-diff="leicht">Leicht</button>
@@ -90,9 +103,10 @@
       </div>
       <div class="m-label">Karte (optional)</div>
       <input id="seed" placeholder="Zufällig — oder Zahl/Wort eingeben" autocomplete="off">
-      <button id="start" class="primary big">Spiel starten</button>
+      <button id="start" class="primary big">Neues Spiel</button>
+      <button id="continue" class="big" style="display:none">Fortsetzen</button>
       <div class="loading">Die Wüste entsteht …</div>
-      <div class="m-ver">Stufe 1 · Prototyp</div>
+      <div class="m-ver">Stufe 2 · Prototyp</div>
     </div>
   </div>
 </div>

@@ -1,6 +1,6 @@
 // Renderer: Kamera, Gelände, Glut, Markierungen, Einheiten, Sturm, Nebel
 import { center, hexPath, R, HW, ring, distance } from './hex.js';
-import { drawUnit, drawBuilding, drawWormSign, drawWormMaw } from './sprites.js';
+import { drawUnit, drawBuilding, drawWormSign, drawWormMaw, drawPod, drawThumper } from './sprites.js';
 import { clamp, rgba } from './util.js';
 
 const FILTER_OK = (() => { try { const c = document.createElement('canvas').getContext('2d'); c.filter = 'blur(2px)'; return c.filter === 'blur(2px)'; } catch { return false; } })();
@@ -11,7 +11,8 @@ export class Renderer {
     this.g = game; this.fx = fx;
     this.cam = { x: 0, y: 0, z: 1 };
     this.floaters = [];
-    this.hl = { move: null, attack: [], build: [], drop: [], path: null, sel: null, hover: null, forecast: null };
+    this.hl = { move: null, attack: [], build: [], drop: [], target: [], path: null, sel: null, hover: null, forecast: null };
+    this.pods = [];
     this.t = 0;
     this.fogDirty = true;
     this.spiceSprites = this.makeSpiceSprites();
@@ -118,6 +119,14 @@ export class Renderer {
     this.fx.drawDecals(ctx);
 
     this.drawWrecks(ctx, dt);
+    for (const th of g.thumpers) if (th.owner === 0 || g.visible[g.i(th.c, th.r)]) { const p = center(th.c, th.r); drawThumper(ctx, p.x, p.y, this.t); }
+    for (const d of g.players[0].pendingDrops) {
+      const p = center(d.c, d.r), k = (this.t * 1.5) % 1;
+      ctx.strokeStyle = `rgba(255,210,120,${1 - k})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x, p.y, 6 + k * 26, 0, 6.28); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,210,120,0.9)'; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, 6.28); ctx.fill();
+      ctx.globalCompositeOperation = 'lighter'; const gr = ctx.createLinearGradient(p.x, p.y - 160, p.x, p.y); gr.addColorStop(0, 'rgba(255,200,100,0)'); gr.addColorStop(1, 'rgba(255,200,100,0.35)');
+      ctx.fillStyle = gr; ctx.fillRect(p.x - 2, p.y - 160, 4, 160); ctx.globalCompositeOperation = 'source-over';
+    }
     // Gebäude
     const bs = g.buildings.filter((b) => !b.gone && g.seen(b)).sort((a, b) => a.r - b.r);
     for (const b of bs) {
@@ -144,13 +153,14 @@ export class Renderer {
     }
 
     // Bodeneinheiten
-    const visU = g.units.filter((u) => !u.gone && !u.carried && (g.seen(u) || u.forceShow));
+    const visU = g.units.filter((u) => !u.gone && !u.carried && !u.hidden && (g.seen(u) || u.forceShow));
     const ground = visU.filter((u) => u.def.mt !== 'air').sort((a, b) => this.posOf(a).y - this.posOf(b).y);
     const air = visU.filter((u) => u.def.mt === 'air').sort((a, b) => this.posOf(a).y - this.posOf(b).y);
     for (const u of ground) this.drawUnitFull(ctx, u);
     this.fx.draw(ctx, 'ground', view);
     this.fx.draw(ctx, 'air', view);
     for (const u of air) this.drawUnitFull(ctx, u);
+    for (const pd of this.pods) drawPod(ctx, pd.x, pd.y, pd.h, pd.open, pd.color, this.t);
     this.drawProjectiles(ctx);
     this.fx.draw(ctx, 'add', view);
     this.drawLighting(ctx, dt, bs, [...ground, ...air]);
@@ -337,6 +347,7 @@ export class Renderer {
     if (hl.move) for (const n of hl.move.values()) if (n.end) fillHex(n.c, n.r, 'rgba(70,160,255,0.22)', 'rgba(120,200,255,0.55)', 1.5);
     for (const [c, r] of hl.build) fillHex(c, r, `rgba(90,230,120,${0.18 + 0.08 * Math.sin(t * 4)})`, 'rgba(120,255,150,0.7)', 1.5);
     for (const [c, r] of hl.drop) fillHex(c, r, 'rgba(90,230,230,0.2)', 'rgba(120,255,255,0.7)', 1.5);
+    for (const [c, r] of hl.target) fillHex(c, r, `rgba(190,120,255,${0.16 + 0.08 * Math.sin(t * 4)})`, 'rgba(210,160,255,0.8)', 1.5);
     for (const e of hl.attack) fillHex(e.c, e.r, `rgba(255,60,40,${0.2 + 0.1 * Math.sin(t * 6)})`, 'rgba(255,90,70,0.95)', 2.5);
     if (hl.hover) fillHex(hl.hover.c, hl.hover.r, 'rgba(255,255,255,0.08)', 'rgba(255,255,255,0.5)', 1.5);
     if (hl.sel) { const p = this.posOf(hl.sel); ctx.beginPath(); hexPath(ctx, center(hl.sel.c, hl.sel.r).x, center(hl.sel.c, hl.sel.r).y, R - 2); ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 2.5; ctx.stroke(); }
@@ -359,6 +370,8 @@ export class Renderer {
     for (const p of this.projectiles || []) {
       if (p.kind === 'shell') {
         ctx.fillStyle = '#ffe4a0'; ctx.beginPath(); ctx.arc(p.x, p.y - p.h, 2.5, 0, 6.28); ctx.fill();
+      } else if (p.kind === 'bomb') {
+        ctx.fillStyle = '#3a3a3a'; ctx.beginPath(); ctx.ellipse(p.x, p.y - p.h, 2.5, 4, 0, 0, 6.28); ctx.fill();
       } else if (p.kind === 'rocket' || p.kind === 'arty') {
         ctx.save(); ctx.translate(p.x, p.y - p.h); ctx.rotate(p.ang || 0);
         ctx.fillStyle = '#d8d8d8'; ctx.fillRect(-5, -1.5, 9, 3);

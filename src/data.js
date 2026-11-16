@@ -2,9 +2,9 @@
 // TP = Trefferpunkte (100 = volle Stärke), Reichweite in Hexfeldern
 
 export const FACTIONS = {
-  vareth: { name: 'Haus Vareth', color: '#3fa8ff', motto: 'Ordnung aus dem Sand' },
-  kordan: { name: 'Haus Kordan', color: '#ff4a3a', motto: 'Stahl über Staub' },
-  ossar: { name: 'Ossar-Syndikat', color: '#5fe07a', motto: 'Was verborgen ist, gehört uns' },
+  vareth: { name: 'Haus Vareth', color: '#3fa8ff', motto: 'Ordnung aus dem Sand', perk: { airCost: 0.85, airMove: 1 }, perkText: 'Thopter 15 % günstiger und +1 Bewegung' },
+  kordan: { name: 'Haus Kordan', color: '#ff4a3a', motto: 'Stahl über Staub', perk: { vehPower: 1.12, bldHp: 1.2 }, perkText: 'Fahrzeuge +12 % Schaden, Gebäude +20 % stabiler' },
+  ossar: { name: 'Ossar-Syndikat', color: '#5fe07a', motto: 'Was verborgen ist, gehört uns', perk: { infMove: 1, dropCost: 0.7 }, perkText: 'Infanterie +1 Bewegung, Orbital-Drops 30 % günstiger' },
 };
 
 export const TERRAIN = {
@@ -33,6 +33,10 @@ export const ARMOR_MOD = {
   tmg:       { inf: 1.05, light: 0.55, heavy: 0.15, bld: 0.1, air: 0.7 },
   trocket:   { inf: 0.55, light: 1.0, heavy: 1.05, bld: 0.75, air: 0 },
   turret:    { inf: 0.8, light: 0.9, heavy: 0.75, bld: 0, air: 0 },
+  bomb:      { inf: 0.8, light: 1.0, heavy: 1.0, bld: 1.3, air: 0 },
+  aam:       { inf: 0, light: 0, heavy: 0, bld: 0, air: 1.15 },
+  blade:     { inf: 1.25, light: 0.3, heavy: 0.1, bld: 0.1, air: 0 },
+  gauss:     { inf: 1.1, light: 0.8, heavy: 0.45, bld: 0.3, air: 0.3 },
 };
 
 export const WEAPONS = {
@@ -43,6 +47,10 @@ export const WEAPONS = {
   artillery: { type: 'artillery', power: 78, range: [2, 4], ground: true, air: false, proj: 'arty', noMoveFire: true, noCounter: true },
   tmg:       { type: 'tmg', power: 48, range: [1, 1], ground: true, air: true, proj: 'bullet' },
   trocket:   { type: 'trocket', power: 70, range: [1, 1], ground: true, air: false, proj: 'rocket', ammo: true },
+  bombs:     { type: 'bomb', power: 95, range: [0, 1], ground: true, air: false, proj: 'bomb', ammo: true },
+  aam:       { type: 'aam', power: 82, range: [1, 2], ground: false, air: true, proj: 'rocket' },
+  blade:     { type: 'blade', power: 45, range: [1, 1], ground: true, air: false, proj: 'blade' },
+  gauss:     { type: 'gauss', power: 62, range: [1, 1], ground: true, air: true, proj: 'bullet' },
   turretGun: { type: 'turret', power: 68, range: [1, 2], ground: true, air: false, proj: 'shell' },
   flak:      { type: 'flak', power: 75, range: [1, 3], ground: false, air: true, proj: 'flak' },
 };
@@ -64,6 +72,14 @@ export const UNITS = {
              desc: 'Weitsicht und Bordkanone. Jagt Infanterie und andere Thopter.' },
   falke:   { name: 'Kampf-Thopter', cat: 'air', move: 7, mt: 'air', sight: 3, armor: 'air', weapon: 'trocket', ammo: 3, cost: 1100, prereq: ['horst', 'ausguck'],
              desc: '3 Raketensalven gegen Panzer und Gebäude. Lädt am Horst nach.' },
+  bomber:  { name: 'Bomber-Thopter', cat: 'air', move: 6, mt: 'air', sight: 2, armor: 'air', weapon: 'bombs', ammo: 2, cost: 1300, prereq: ['horst', 'ausguck'],
+             desc: 'Wirft Bomben auf das Feld unter sich oder daneben. Stark gegen Gebäude. 2 Abwürfe, lädt am Horst nach.' },
+  jaeger:  { name: 'Abfang-Thopter', cat: 'air', move: 9, mt: 'air', sight: 3, armor: 'air', weapon: 'aam', cost: 850, prereq: ['horst'],
+             desc: 'Luft-Luft-Raketen mit Reichweite 2. Holt feindliche Thopter vom Himmel, kann keine Bodenziele treffen.' },
+  schwester: { name: 'Verhüllte Schwester', cat: 'sis', move: 3, mt: 'foot', sight: 3, armor: 'inf', weapon: 'blade', cost: 500, prereq: ['konvent'], vib: 0.5, voice: true,
+             desc: 'Kann mit der Stimme eine feindliche Einheit in 2 Feldern Umkreis für eine Runde lähmen (alle 3 Runden). Im Nahkampf tödlich gegen Infanterie.' },
+  soeldner: { name: 'Gilden-Söldner', cat: 'drop', move: 3, mt: 'foot', sight: 2, armor: 'inf', weapon: 'gauss', cost: 0, vib: 1,
+             desc: 'Elite-Infanterie der Gilde, nur per Orbital-Drop. Gaußgewehr trifft auch Thopter.' },
   traeger: { name: 'Träger-Thopter', cat: 'air', move: 8, mt: 'air', sight: 2, armor: 'air', cost: 800, prereq: ['horst'], carrier: true,
              desc: 'Hebt eine Bodeneinheit an und setzt sie ab — rettet Ernter vor Würmern.' },
 };
@@ -83,6 +99,10 @@ export const BUILDINGS = {
                 desc: 'Weite Sicht. Zeigt Wurmzeichen im Umkreis von 9 Feldern.' },
   horst:      { name: 'Thopter-Horst', cat: 'bld', hp: 220, power: -40, cost: 1000, turns: 2, sight: 2, prereq: ['ausguck'], produces: 'air',
                 desc: 'Baut Thopter und munitioniert Kampf-Thopter auf.' },
+  kontor:     { name: 'Gildenkontor', cat: 'bld', hp: 220, power: -40, cost: 1200, turns: 2, sight: 2, prereq: ['ausguck'],
+                desc: 'Draht zur Gilde der Leere: Orbital-Drops auf jedes bekannte Feld. Ein Drop alle 2 Runden.' },
+  konvent:    { name: 'Konvent', cat: 'bld', hp: 180, power: -30, cost: 1000, turns: 2, sight: 3, prereq: ['kaserne', 'raffinerie'], produces: 'sis',
+                desc: 'Sitz der Verhüllten Schwesternschaft: alle 3 Runden eine Intrigenkarte, bildet Schwestern aus.' },
   turm:       { name: 'Geschützturm', cat: 'def', hp: 200, power: -15, cost: 500, turns: 1, sight: 3, prereq: ['kaserne'], weapon: 'turretGun',
                 desc: 'Bodenabwehr, Reichweite 2. Feuert automatisch am Rundenende.' },
   flak:       { name: 'Flakstellung', cat: 'def', hp: 160, power: -20, cost: 600, turns: 1, sight: 3, prereq: ['ausguck'], weapon: 'flak',
@@ -96,3 +116,21 @@ export const DIFFICULTY = {
 };
 
 export const START_CREDITS = 2500;
+
+export const DROPS = {
+  trupp:  { name: 'Söldnertrupp', units: ['inf', 'inf', 'rak'], cost: 650, desc: '2 Infanteristen und ein Raketentrupp.' },
+  elite:  { name: 'Gilden-Söldner', units: ['soeldner', 'soeldner'], cost: 1100, desc: 'Zwei Trupps Elite-Infanterie mit Gaußgewehren.' },
+  panzer: { name: 'Panzerlieferung', units: ['panzer'], cost: 1250, desc: 'Ein Kampfpanzer, direkt an die Front.' },
+  ernter: { name: 'Ernter-Lieferung', units: ['ernter'], cost: 1300, desc: 'Ein Ernter, abgesetzt direkt an einem Glutfeld.' },
+};
+
+export const CARDS = {
+  stimme:    { name: 'Stimme', target: 'enemyUnit', weight: 3, desc: 'Eine sichtbare feindliche Einheit kann in ihrer nächsten Runde nicht handeln.' },
+  vorahnung: { name: 'Vorahnung', target: 'none', weight: 2, desc: 'Deckt für den Rest dieser Runde die ganze Karte auf.' },
+  wetter:    { name: 'Wetterkunde', target: 'stormHex', weight: 2, desc: 'Lenkt den Sturm: Wählt sein nächstes Ziel, bis zu 4 Felder vom vorhergesagten entfernt.' },
+  klopfer:   { name: 'Klopfer', target: 'sandHex', weight: 3, desc: 'Ein Köder im Sand. In der Weltphase kommen alle Würmer im Umkreis von 12 Feldern dorthin und verschlingen, was im Umkreis von 1 Feld steht.' },
+  verrat:    { name: 'Verrat', target: 'enemyInf', weight: 2, desc: 'Eine sichtbare feindliche Infanterie-Einheit läuft zu euch über.' },
+  schild:    { name: 'Schildwall', target: 'own', weight: 3, desc: 'Eine eigene Einheit oder ein Gebäude erleidet 2 Runden lang nur halben Schaden.' },
+  sabotage:  { name: 'Sabotage', target: 'enemyBld', weight: 2, desc: 'Ein bekanntes feindliches Gebäude fällt eine Runde lang aus: keine Produktion, kein Strom, keine Abwehr.' },
+  gilde:     { name: 'Gildenschuld', target: 'none', weight: 1, desc: 'Der nächste Orbital-Drop kostet nichts.' },
+};

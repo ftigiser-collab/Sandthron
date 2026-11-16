@@ -1,7 +1,7 @@
 // Steuerung: Eingabe, Auswahl, Menüs, Animationen, Rundenablauf
-import { UNITS, BUILDINGS, WEAPONS, TERRAIN, MOVE_COST } from './data.js';
+import { UNITS, BUILDINGS, WEAPONS, TERRAIN, MOVE_COST, CARDS, DROPS, FACTIONS } from './data.js';
 import { center, pixelToHex, distance, R } from './hex.js';
-import { icon } from './sprites.js';
+import { icon, cardArt } from './sprites.js';
 import { angDiff } from './util.js';
 import { aiTurn, autoHarvest } from './ai.js';
 
@@ -20,6 +20,8 @@ export class Controller {
     this.actAnimated = {
       move: (u, c, r, reach) => this.doMove(u, c, r, reach, u.owner !== 0),
       attack: (u, t) => this.doAttack(u, t),
+      voice: (u, t) => this.doVoice(u, t),
+      card: (owner, idx, c, r) => this.doCard(owner, idx, c, r),
     };
     this.bindInput();
     this.bindDom();
@@ -77,6 +79,20 @@ export class Controller {
     if (proj === 'flak') {
       return this.tween(0.5, (k, dt) => {
         if (Math.random() < dt * 9) { const jx = (Math.random() - 0.5) * 26, jy = (Math.random() - 0.5) * 26; fx.flash(tx + jx, ty + jy, 14, '255,210,140', 0.15); fx.smoke(tx + jx, ty + jy, 2, 4, 0.9); fx.flash(sx, sy, 9, '255,220,150', 0.05); }
+      });
+    }
+    if (proj === 'blade') {
+      return this.tween(0.35, (k, dt) => {
+        if (Math.random() < dt * 14) { const a = Math.random() * 6.28; fx.tracer(tx + Math.cos(a) * 10, ty + Math.sin(a) * 10, tx - Math.cos(a) * 10, ty - Math.sin(a) * 10, '230,210,255'); fx.spark(tx, ty, 2, '240,220,255', 40); }
+      });
+    }
+    if (proj === 'bomb') {
+      const bombs = [0, 1, 2].map((k) => ({ kind: 'bomb', x: sx + (k - 1) * 6, y: pt.y + (k - 1) * 8, h: az, ang: 0, d: k * 0.08 }));
+      this.projectiles = this.projectiles || []; this.projectiles.push(...bombs);
+      return this.tween(0.55, (k) => { for (const b of bombs) { const kk = Math.max(0, Math.min(1, (k - b.d) / 0.7)); b.h = az * (1 - kk * kk); b.x = sx + (tx - sx) * kk + (b.d - 0.08) * 60; b.y = pt.y + (ty + tz - pt.y) * kk; } }).then(() => {
+        this.projectiles = this.projectiles.filter((q) => !bombs.includes(q));
+        bombs.forEach((b, i) => setTimeout(() => fx.explosion(b.x, b.y, 0.9), i * 70));
+        fx.shake = 5;
       });
     }
     const p = { kind: proj === 'arty' ? 'arty' : proj, x: sx, y: sy, h: 0, ang: Math.atan2(ty - sy, tx - sx) };
@@ -219,7 +235,9 @@ export class Controller {
       } else if (ev.type === 'built') {
         const b = g.get(ev.b); if (!b || !g.seen(b)) continue;
         const p = this.r.posOf(b); b.rise = 0; this.fx.dust(p.x, p.y, 14, '170,150,120', 40, 8); this.tween(0.6, (k) => { b.rise = k; });
-      } else if (ev.type === 'income') {
+      } else if (ev.type === 'orbital') await this.animOrbital(ev);
+      else if (ev.type === 'card') { if (ev.owner === 0) { this.pulse('#cardsbtn'); this.refresh(); } }
+      else if (ev.type === 'income') {
         if (ev.owner === 0) { const b = g.buildings.find((x) => x.owner === 0 && x.type === 'bauhof'); if (b) { const p = center(b.c, b.r); this.r.float(p.x, p.y - 20, `+${ev.amount} Credits`, '#8ef08a'); } }
       } else if (ev.type === 'rearm') {
         const u = g.get(ev.u); if (u && u.owner === 0) { const p = this.r.posOf(u); this.r.float(p.x, p.y - 26, 'Aufmunitioniert', '#a0e0ff'); }
@@ -252,9 +270,10 @@ export class Controller {
     const g = this.g, w = g.byId.get(ev.id); if (!w) return;
     const pts = ev.path.map((h) => center(h.c, h.r));
     const seenAny = ev.path.some((h) => g.visible[g.i(h.c, h.r)] || g.radar[g.i(h.c, h.r)]);
-    const victim = ev.eat ? g.byId.get(ev.eat) : null;
-    const show = seenAny || (victim && victim.owner === 0);
-    if (!show) { if (victim) victim.gone = true; return; }
+    const victims = (ev.eatMany || (ev.eat ? [ev.eat] : [])).map((id) => g.byId.get(id)).filter(Boolean);
+    const victim = victims[0] || (ev.thumper ? { owner: -1 } : null);
+    const show = seenAny || victims.some((v) => v.owner === 0) || ev.thumper;
+    if (!show) { for (const v of victims) v.gone = true; return; }
     w.forceShow = true;
     if (victim) this.r.centerOn(pts[pts.length - 1].x, pts[pts.length - 1].y);
     if (pts.length > 1) {
@@ -269,14 +288,81 @@ export class Controller {
       this.fx.shake = 8;
       this.fx.sandBurst(p.x, p.y, 50, 36);
       await this.tween(0.45, (k) => { w.surface = k; });
-      victim.gone = true;
+      for (const v of victims) v.gone = true;
       this.fx.sandBurst(p.x, p.y, 30, 20);
-      this.r.float(p.x, p.y - 30, 'Verschlungen!', '#ff7050', true);
+      this.r.float(p.x, p.y - 30, victims.length ? 'Verschlungen!' : 'Der Köder ist weg', '#ff7050', true);
       await this.wait(0.5);
       await this.tween(0.6, (k) => { w.surface = 1 - k; });
       w.surface = 0;
     }
     w.vis = null; w.forceShow = false;
+  }
+
+  async animOrbital(ev) {
+    const g = this.g, units = ev.units.map((id) => g.get(id)).filter(Boolean);
+    const seen = ev.owner === 0 || units.some((u) => g.visible[g.i(u.c, u.r)]);
+    if (!seen) return;
+    const col = g.players[ev.owner].color;
+    for (const u of units) u.hidden = true;
+    const tgt = center(ev.c, ev.r);
+    this.r.centerOn(tgt.x, tgt.y); await this.wait(0.3);
+    const pods = units.map((u, i) => { const p = center(u.c, u.r); return { x: p.x, y: p.y, h: 520 + i * 60, open: 0, color: col, ox: 260 + i * 30 }; });
+    this.r.pods.push(...pods);
+    await this.tween(1.0, (k) => {
+      for (const pd of pods) {
+        const kk = Math.min(1, k * (520 / (pd.h0 || (pd.h0 = pd.h))));
+        pd.cur = 1 - k; pd.hh = pd.h0 * (1 - k);
+        pd.h = pd.hh; pd.drawX = pd.x + pd.ox * (1 - k);
+        if (Math.random() < 0.9) { this.fx.fire(pd.x + pd.ox * (1 - k) * 0, pd.y - pd.h, 1, 5); this.fx.smoke(pd.x, pd.y - pd.h + 10, 1, 5, 0.6); }
+      }
+    });
+    for (const pd of pods) { pd.h = 0; this.fx.explosion(pd.x, pd.y, 0.7); this.fx.ring(pd.x, pd.y, 14, '255,220,170', 0.6); this.fx.dust(pd.x, pd.y, 16, '200,160,110', 40, 9); }
+    this.fx.shake = 7;
+    await this.tween(0.4, (k) => { for (const pd of pods) pd.open = k; });
+    for (const u of units) { u.hidden = false; this.hitFlash(u); }
+    await this.wait(0.5);
+    this.r.pods = this.r.pods.filter((p) => !pods.includes(p));
+    if (ev.owner === 0) { g.updateVision(); this.r.fogDirty = true; }
+  }
+
+  async doVoice(u, t) {
+    const g = this.g;
+    const ev = g.voice(u, t);
+    const a = this.r.posOf(u), b = this.r.posOf(t);
+    if (u.owner === 0 || g.seen(u) || g.seen(t)) {
+      this.ensureVisible(b.x, b.y);
+      await this.tween(0.7, (k, dt) => {
+        if (Math.random() < dt * 14) this.fx.ring(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, 4, '210,150,255', 0.5);
+      });
+      this.fx.ring(b.x, b.y, 10, '210,150,255', 0.7); this.fx.flash(b.x, b.y, 30, '190,120,255', 0.3);
+      this.r.float(b.x, b.y - 10, 'Gelähmt!', '#d6a8ff', true);
+      await this.wait(0.4);
+    }
+  }
+
+  async doCard(owner, idx, c, r) {
+    const g = this.g;
+    const ev = g.playCard(owner, idx, c, r);
+    if (!ev) return false;
+    const p = center(c, r);
+    const card = CARDS[ev.card];
+    const visible = owner === 0 || (c !== undefined && g.visible[g.i(c, r)]);
+    await this.banner(card.name, owner === 0 ? 'Intrige der Schwesternschaft' : `${g.players[owner].name} spielt eine Intrige`, 0.9);
+    if (!visible && !['wetter', 'sabotage', 'stimme', 'verrat'].includes(ev.card)) { this.refresh(); return true; }
+    if (ev.target || ev.card === 'klopfer' || ev.card === 'wetter') { this.r.centerOn(p.x, p.y); await this.wait(0.3); }
+    const fx = this.fx;
+    if (ev.card === 'stimme') { fx.ring(p.x, p.y, 12, '210,150,255', 0.8); fx.flash(p.x, p.y, 40, '190,120,255', 0.4); this.r.float(p.x, p.y, 'Gelähmt!', '#d6a8ff', true); }
+    else if (ev.card === 'vorahnung') { this.r.fogDirty = true; $('#app').classList.add('vision'); setTimeout(() => $('#app').classList.remove('vision'), 900); }
+    else if (ev.card === 'wetter') { fx.ring(p.x, p.y, 20, '255,190,120', 0.8); this.r.float(p.x, p.y, 'Sturm umgelenkt', '#ffc080', true); }
+    else if (ev.card === 'klopfer') { fx.dust(p.x, p.y, 10, '200,160,110', 20, 6); this.r.float(p.x, p.y, 'Klopfer gesetzt', '#ffd080', true); }
+    else if (ev.card === 'verrat') { const u = g.get(ev.target); fx.spark(p.x, p.y, 20, '210,160,255', 90); if (u) this.hitFlash(u); this.r.float(p.x, p.y, 'Übergelaufen!', '#d6a8ff', true); }
+    else if (ev.card === 'schild') { fx.ring(p.x, p.y, 14, '140,210,255', 0.8); this.r.float(p.x, p.y, 'Schildwall', '#9fdcff', true); }
+    else if (ev.card === 'sabotage') { for (let k = 0; k < 6; k++) setTimeout(() => { fx.spark(p.x + (Math.random() - 0.5) * 30, p.y + (Math.random() - 0.5) * 30, 6, '255,200,120', 80); fx.smoke(p.x, p.y, 2, 6, 0.9); }, k * 90); this.r.float(p.x, p.y, 'Sabotiert!', '#ffb070', true); }
+    else if (ev.card === 'gilde' && owner === 0) { this.flash('Nächster Orbital-Drop kostenlos'); }
+    await this.wait(0.6);
+    g.updateVision(); this.r.fogDirty = true;
+    this.refresh();
+    return true;
   }
 
   pulse(sel) { const el = $(sel); if (!el) return; el.classList.remove('pulse'); void el.offsetWidth; el.classList.add('pulse'); }
@@ -311,7 +397,7 @@ export class Controller {
   }
 
   // ---------- Auswahl ----------
-  clearHL() { Object.assign(this.r.hl, { move: null, attack: [], build: [], drop: [], path: null, sel: null, forecast: null }); this.hideForecast(); }
+  clearHL() { Object.assign(this.r.hl, { move: null, attack: [], build: [], drop: [], target: [], path: null, sel: null, forecast: null }); this.hideForecast(); }
 
   deselect() { this.sel = null; this.mode = 'idle'; this.reach = null; this.afterMove.clear(); this.clearHL(); this.showPanel(null); }
 
@@ -379,6 +465,16 @@ export class Controller {
         this.deselect(); this.refresh(); return;
       }
       this.mode = 'moved'; this.select(this.sel); return;
+    }
+    if (this.mode === 'card' || this.mode === 'orbital' || this.mode === 'voice') {
+      const hit = this.r.hl.target.some(([tc, tr]) => tc === c && tr === r);
+      const m = this.mode; this.clearHL(); this.mode = 'idle';
+      if (!hit) { this.deselect(); return; }
+      this.busy = true;
+      if (m === 'card') await this.doCard(0, this.cardIdx, c, r);
+      else if (m === 'orbital') { if (g.orderDrop(0, this.dropId, c, r)) { const p = center(c, r); this.fx.ring(p.x, p.y, 10, '255,210,120', 0.6); } }
+      else if (m === 'voice') { const t = g.voiceTargets(this.sel).find((t) => t.c === c && t.r === r); if (t) await this.doVoice(this.sel, t); }
+      this.busy = false; this.deselect(); this.refresh(); return;
     }
     if (this.mode === 'pickup') {
       const t = ownAt.find((e) => g.canPickup(this.sel, e));
@@ -498,8 +594,10 @@ export class Controller {
     this.busy = false;
     $('#endturn').disabled = false;
     this.refresh();
-    this.save?.();
+    this.save();
   }
+
+  save() { try { localStorage.setItem('sandthron-save', this.g.serialize()); } catch (e) { /* Speicher voll oder gesperrt */ } }
 
   checkEnd() {
     const s = this.g.checkEnd();
@@ -510,6 +608,7 @@ export class Controller {
     el.querySelector('h1').textContent = s === 'won' ? 'Der Sand gehört euch' : 'Eure Basis ist gefallen';
     el.querySelector('.stats').innerHTML = `Runde ${this.g.round} · Gegner vernichtet: ${p.stats.kills} · Eigene Verluste: ${p.stats.lost} · Glut geerntet: ${p.stats.harvested}`;
     el.classList.add('show');
+    try { localStorage.removeItem('sandthron-save'); } catch (e) {}
     this.onEnd?.();
     return true;
   }
@@ -592,6 +691,7 @@ export class Controller {
     $('#endturn').onclick = () => this.endTurn();
     $('#nextunit').onclick = () => this.nextUnit();
     $('#helpbtn').onclick = () => $('#help').classList.toggle('show');
+    $('#cardsbtn').onclick = () => this.showCards();
     $('#help').onclick = (e) => { if (e.target.id === 'help' || e.target.classList.contains('close')) $('#help').classList.remove('show'); };
     $('#zoomin').onclick = () => this.r.zoomAt(this.r.vw / 2, this.r.vh / 2, 1.2);
     $('#zoomout').onclick = () => this.r.zoomAt(this.r.vw / 2, this.r.vh / 2, 1 / 1.2);
@@ -617,6 +717,7 @@ export class Controller {
     pw.parentElement.classList.toggle('low', p.low);
     const left = g.ownUnits(0).filter((u) => !u.acted && !u.carried && !u.moved && !(u.def.harvester && u.auto)).length;
     $('#nextunit').textContent = left ? `Nächste Einheit (${left})` : 'Nächste Einheit';
+    const cb = $('#cardsbtn'); cb.textContent = `Intrigen (${p.cards.length})`; cb.classList.toggle('ready', p.cards.length > 0 && g.canPlayCard(0));
     if (this.sel && !this.sel.dead) this.showPanel(this.sel, true);
   }
 
@@ -679,6 +780,8 @@ export class Controller {
       if (own && g.current === 0) {
         const btns = [];
         if (e.def.harvester) btns.push(`<button data-a="auto" class="${e.auto ? 'on' : ''}">Auto-Ernte: ${e.auto ? 'an' : 'aus'}</button>`);
+        if (e.def.voice) btns.push(g.canVoice(e) ? (g.voiceTargets(e).length ? '<button data-a="voice" class="purple">Stimme einsetzen</button>' : '<button disabled>Stimme: kein Ziel in 2 Feldern</button>') : `<button disabled>Stimme bereit in ${e.voiceCd || 0} ${e.voiceCd === 1 ? 'Runde' : 'Runden'}</button>`);
+        if (e.stunned > 0 || e.wasStunned) btns.push('<button disabled>Gelähmt</button>');
         if (e.def.carrier && !e.acted) {
           if (e.carrying) btns.push('<button data-a="drop">Absetzen</button>');
           else if (g.units.some((t) => g.canPickup(e, t))) btns.push('<button data-a="pickup">Aufnehmen</button>');
@@ -722,9 +825,23 @@ export class Controller {
         if (d.cat !== b.def.produces) continue;
         const pre = g.prereqOk(0, d);
         const missing = pre ? '' : 'Benötigt: ' + d.prereq.filter((x) => !g.has(0, x)).map((x) => BUILDINGS[x].name).join(', ');
-        items.push({ kind: 'unit', t, d, ok: g.canProduce(b, t), missing, sub: `${d.cost}` });
+        items.push({ kind: 'unit', t, d, ok: g.canProduce(b, t), missing, sub: `${g.unitCost(0, t)}` });
       }
+    } else if (b.type === 'kontor') {
+      const can = g.canDrop(0);
+      title = !g.active(b) ? 'Kontor außer Betrieb' : p.low ? 'Energie zu niedrig' : p.dropCd > 0 ? `Gilde wieder bereit in ${p.dropCd} ${p.dropCd === 1 ? 'Runde' : 'Runden'}` : p.freeDrop ? 'Orbital-Drop — der nächste ist kostenlos' : 'Orbital-Drop (landet nächste Runde)';
+      const html = Object.entries(DROPS).map(([id, d]) => {
+        const cost = g.dropCost(0, id), ok = can && p.credits >= cost;
+        return `<button class="drop ${ok ? '' : 'locked'}" data-a="orbital" data-t="${id}"><b>${d.name}</b><span>${d.desc}</span><em>◈ ${cost}</em></button>`;
+      }).join('');
+      return `<div class="p-title">${title}</div><div class="drops">${html}</div>`;
+    } else if (b.type === 'konvent' && !items.length) {
+      title = 'Ausbilden (fertig nächste Runde)';
     } else return '';
+    if (b.type === 'konvent') {
+      title = b.producing ? `In Ausbildung: ${UNITS[b.producing].name}` : 'Ausbilden (fertig nächste Runde)';
+      items = [{ kind: 'unit', t: 'schwester', d: UNITS.schwester, ok: g.canProduce(b, 'schwester'), missing: '', sub: `${g.unitCost(0, 'schwester')}` }];
+    }
     const cards = items.map((it) => `<button class="card ${it.ok ? '' : 'locked'}" data-a="${it.kind === 'bld' ? 'build' : 'prod'}" data-t="${it.t}" title="${it.missing || it.d.desc}">
       <canvas data-icon="${it.kind === 'bld' ? 'bld' : 'unit'}:${it.t}"></canvas><span class="c-name">${it.d.name}</span><span class="c-cost">◈ ${it.sub}</span>${it.missing ? `<span class="c-lock">${it.missing}</span>` : ''}</button>`).join('');
     const cancel = b.producing ? '<button data-a="cancelprod" class="wide">Produktion abbrechen (Rückerstattung)</button>' : '';
@@ -749,8 +866,41 @@ export class Controller {
     }
     if (a === 'prod') { if (g.produce(e, t)) { this.flash(`${UNITS[t].name} in Auftrag gegeben`); this.refresh(); this.showPanel(e); } else this.flash('Produktion nicht möglich'); return; }
     if (a === 'cancelprod') { g.cancelProduce(e); this.refresh(); this.showPanel(e); return; }
+    if (a === 'voice') { this.mode = 'voice'; this.clearHL(); this.r.hl.sel = e; this.r.hl.target = g.voiceTargets(e).map((t) => [t.c, t.r]); this.flash('Ziel für die Stimme antippen'); return; }
+    if (a === 'orbital') {
+      const cost = g.dropCost(0, t);
+      if (!g.canDrop(0) || g.players[0].credits < cost) { this.flash(g.players[0].credits < cost ? 'Zu wenig Credits' : 'Gilde gerade nicht bereit'); return; }
+      this.clearHL(); this.mode = 'orbital'; this.dropId = t; this.r.hl.target = g.orbitalHexes(0);
+      $('#panel').classList.remove('show'); this.flash(`${DROPS[t].name}: Landezone antippen`); return;
+    }
     if (a === 'pickup') { this.mode = 'pickup'; this.clearHL(); this.r.hl.sel = e; this.r.hl.drop = g.units.filter((u) => g.canPickup(e, u)).map((u) => [u.c, u.r]); this.flash('Einheit zum Aufnehmen antippen'); return; }
     if (a === 'drop') { this.mode = 'drop'; this.clearHL(); this.r.hl.sel = e; this.r.hl.drop = g.dropHexes(e); this.flash('Feld zum Absetzen antippen'); return; }
+  }
+
+  showCards() {
+    const g = this.g, p = g.players[0], el = $('#cards');
+    if (el.classList.contains('show')) { el.classList.remove('show'); return; }
+    const can = g.canPlayCard(0) && !this.busy;
+    const hand = p.cards.map((id, i) => `<div class="icard"><canvas data-card="${id}"></canvas><b>${CARDS[id].name}</b><p>${CARDS[id].desc}</p><button class="primary" data-i="${i}" ${can ? '' : 'disabled'}>Ausspielen</button></div>`).join('');
+    const has = g.has(0, 'konvent');
+    el.innerHTML = `<div class="box"><button class="close">×</button><h2>Intrigen der Schwesternschaft</h2>
+      <div class="sub">${has ? `Neue Karte in ${3 - p.cardTimer} ${3 - p.cardTimer === 1 ? 'Runde' : 'Runden'} · ` : 'Baut einen Konvent, um Karten zu erhalten · '}Eine Karte pro Runde${can ? '' : ' — diese Runde schon gespielt'}</div>
+      <div class="hand">${hand || '<p class="empty">Keine Karten auf der Hand.</p>'}</div></div>`;
+    el.querySelectorAll('canvas[data-card]').forEach((c) => { const src = cardArt(c.dataset.card); c.width = 120; c.height = 80; c.getContext('2d').drawImage(src, 0, 0); });
+    el.querySelectorAll('button[data-i]').forEach((b) => b.onclick = () => this.playCardUI(Number(b.dataset.i)));
+    el.querySelector('.close').onclick = () => el.classList.remove('show');
+    el.classList.add('show');
+  }
+
+  async playCardUI(i) {
+    const g = this.g, id = g.players[0].cards[i];
+    $('#cards').classList.remove('show');
+    if (!id || !g.canPlayCard(0)) return;
+    if (CARDS[id].target === 'none') { this.busy = true; await this.doCard(0, i); this.busy = false; this.refresh(); return; }
+    const ts = g.cardTargets(0, id);
+    if (!ts.length) { this.flash('Kein gültiges Ziel für diese Karte'); return; }
+    this.deselect(); this.mode = 'card'; this.cardIdx = i; this.r.hl.target = ts;
+    this.flash(`${CARDS[id].name}: Ziel antippen`);
   }
 
   drawMinimap() {
