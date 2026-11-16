@@ -55,6 +55,7 @@ export class Controller {
       u.vis = { x: a.x + (b.x - a.x) * l, y: a.y + (b.y - a.y) * l };
       u.facing = Math.atan2(b.y - a.y, b.x - a.x);
       if (u.def.mt !== 'air' && u.def.cat === 'veh' && sand(path[i + 1]) && Math.random() < 0.5) this.fx.dust(u.vis.x - Math.cos(u.facing) * 12, u.vis.y - Math.sin(u.facing) * 12, 1, '205,160,100', 6, 4);
+      if (u.def.mt !== 'air' && u.def.cat === 'veh') { const lt = u._lt; if (!lt || Math.hypot(u.vis.x - lt.x, u.vis.y - lt.y) > 7) { this.fx.track(u.vis.x, u.vis.y, u.facing, u.type === 'trike' ? 8 : u.type === 'ernter' ? 15 : 11); u._lt = { ...u.vis }; } }
       if (u.def.mt === 'air' && sand(path[i + 1]) && Math.random() < 0.15) this.fx.dust(u.vis.x, u.vis.y, 1, '210,170,110', 14, 5);
       if (u.def.cat === 'inf' && Math.random() < 0.08) this.fx.dust(u.vis.x, u.vis.y + 4, 1, '190,150,100', 8, 2);
       const c = u.carrying && this.g.get(u.carrying); if (c) c.vis = u.vis;
@@ -232,7 +233,7 @@ export class Controller {
           const a = center(src.c, src.r);
           u.facing = Math.atan2(p.y - a.y, p.x - a.x);
           if (u.def.mt === 'air') { u.z = 0; this.tween(0.9, (k) => { u.z = 26 * k; u.vis = { x: a.x + (p.x - a.x) * k * k, y: a.y + (p.y - a.y) * k * k }; if (Math.random() < 0.4) this.fx.dust(u.vis.x, u.vis.y, 1, '200,180,150', 18, 6); }).then(() => { u.vis = null; }); }
-          else { u.anim = true; this.fx.dust(a.x, a.y + 10, 6, '160,140,120', 20, 6); this.tween(0.6, (k) => { const kk = 1 - (1 - k) * (1 - k); u.vis = { x: a.x + (p.x - a.x) * kk, y: a.y + (p.y - a.y) * kk }; }).then(() => { u.vis = null; u.anim = false; }); }
+          else { u.anim = true; this.fx.dust(a.x, a.y + 10, 6, '160,140,120', 20, 6); src.door = 1; this.tween(1.4, (k) => { src.door = k < 0.7 ? 1 : 1 - (k - 0.7) / 0.3; }); this.tween(0.6, (k) => { const kk = 1 - (1 - k) * (1 - k); u.vis = { x: a.x + (p.x - a.x) * kk, y: a.y + (p.y - a.y) * kk }; }).then(() => { u.vis = null; u.anim = false; }); }
         } else if (u.def.mt === 'air') { u.z = 0; this.tween(0.8, (k) => { u.z = 26 * k; }); }
       } else if (ev.type === 'built') {
         const b = g.get(ev.b); if (!b || !g.seen(b)) continue;

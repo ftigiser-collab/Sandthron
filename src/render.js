@@ -70,6 +70,19 @@ export class Renderer {
     return out;
   }
 
+  // Zeichnet über einen kleinen Puffer und färbt ein — schneller als ctx.filter
+  tinted(ctx, x, y, tint, draw, size = 170) {
+    const k = this.cam.z * this.dpr, S = Math.ceil(size * k);
+    const oc = this._oc || (this._oc = document.createElement('canvas'));
+    if (oc.width !== S) { oc.width = S; oc.height = S; }
+    const o = oc.getContext('2d');
+    o.setTransform(1, 0, 0, 1, 0, 0); o.globalCompositeOperation = 'source-over'; o.clearRect(0, 0, S, S);
+    o.setTransform(k, 0, 0, k, S / 2, S / 2);
+    draw(o);
+    o.setTransform(1, 0, 0, 1, 0, 0); o.globalCompositeOperation = 'source-atop'; o.fillStyle = tint; o.fillRect(0, 0, S, S);
+    ctx.drawImage(oc, x - size / 2, y - size / 2, size, size);
+  }
+
   float(x, y, text, color = '#fff', big = false) { this.floaters.push({ x, y, text, color, t: 0, life: 1.4, big }); }
 
   posOf(e) { if (e.vis) return e.vis; const p = center(e.c, e.r); return p; }
@@ -94,6 +107,7 @@ export class Renderer {
 
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(g.map.base, 0, 0);
+    this.drawSandDrift(ctx);
 
     // Glut
     for (let r = 0; r < g.H; r++) for (let c = 0; c < g.W; c++) {
@@ -132,10 +146,9 @@ export class Renderer {
     for (const b of bs) {
       const p = this.posOf(b);
       const col = g.players[b.owner].color;
-      ctx.save();
-      if (b.hitFlash > 0 && FILTER_OK) ctx.filter = `brightness(${1 + b.hitFlash * 1.6})`;
-      drawBuilding(ctx, b, p.x, p.y, col, this.t, { unloading: b.unloading > 0, recoil: b.recoil || 0 });
-      ctx.restore();
+      const bo = { unloading: b.unloading > 0, recoil: b.recoil || 0, door: b.door || 0 };
+      if (b.hitFlash > 0.05) this.tinted(ctx, p.x, p.y, `rgba(255,255,255,${b.hitFlash * 0.6})`, (o) => drawBuilding(o, b, 0, 0, col, this.t, bo), 90);
+      else drawBuilding(ctx, b, p.x, p.y, col, this.t, bo);
       if (b.turnsLeft > 0 && Math.random() < 0.08) { const sx = p.x + (Math.random() - 0.5) * 30, sy = p.y + (Math.random() - 0.5) * 30; this.fx.spark(sx, sy, 3, '255,230,150', 50); this.fx.flash(sx, sy, 8, '200,230,255', 0.06); }
       const hpk = b.hp / b.maxHp;
       if (hpk < 0.6 && Math.random() < 0.05) this.fx.smoke(p.x + (Math.random() - 0.5) * 30, p.y + (Math.random() - 0.5) * 24, 1, 5, 0.8);
@@ -166,6 +179,7 @@ export class Renderer {
     for (const pd of this.pods) drawPod(ctx, pd.x, pd.y, pd.h, pd.open, pd.color, this.t);
     this.drawProjectiles(ctx);
     this.fx.draw(ctx, 'add', view);
+    this.drawClouds(ctx, dt);
     this.drawLighting(ctx, dt, bs, [...ground, ...air]);
 
     this.drawStorm(ctx);
@@ -192,10 +206,6 @@ export class Renderer {
       ctx.beginPath(); hexPath(ctx, 0, 0, R - 5); ctx.stroke(); ctx.restore();
     }
     ctx.save();
-    const filt = [];
-    if (done) filt.push('saturate(0.25) brightness(0.8)');
-    if (u.hitFlash > 0) filt.push(`brightness(${1 + u.hitFlash * 1.8})`);
-    if (filt.length) { if (FILTER_OK) ctx.filter = filt.join(' '); else if (done) ctx.globalAlpha = 0.7; }
     const turretUnit = u.type === 'panzer' || u.type === 'werfer';
     const idleTurret = turretUnit && !(u.aimUntil > this.t) ? Math.sin(this.t * 0.45 + u.id * 1.7) * 0.4 : (u.turretRel || 0);
     const air = u.def.mt === 'air';
@@ -205,7 +215,9 @@ export class Renderer {
       const c = g.get(u.carrying);
       if (c) o.carry = () => drawUnit(ctx, c, 0, 0, col, this.t, { turret: 0 });
     }
-    drawUnit(ctx, u, p.x, p.y, col, this.t, o);
+    if (u.hitFlash > 0.05) this.tinted(ctx, p.x, p.y, `rgba(255,255,255,${u.hitFlash * 0.65})`, (oc) => drawUnit(oc, u, 0, 0, col, this.t, o));
+    else if (done) this.tinted(ctx, p.x, p.y, 'rgba(70,64,58,0.5)', (oc) => drawUnit(oc, u, 0, 0, col, this.t, o));
+    else drawUnit(ctx, u, p.x, p.y, col, this.t, o);
     ctx.restore();
     // Leerlauf: Abgase, Erntewalze
     if (u.def.cat === 'veh' && Math.random() < (u.anim ? 0.25 : 0.03)) {
@@ -258,8 +270,8 @@ export class Renderer {
       w.t += dt; if (w.t > w.life) continue; keep.push(w);
       ctx.save();
       ctx.globalAlpha = Math.min(1, (w.life - w.t) / 6);
-      if (FILTER_OK) ctx.filter = 'grayscale(1) brightness(0.32)';
-      drawUnit(ctx, w.unit, w.x, w.y, '#333333', 0, { z: 0, turret: 0.6 });
+      if (!w.img) { w.img = true; }
+      this.tinted(ctx, w.x, w.y, 'rgba(24,20,17,0.82)', (oc) => drawUnit(oc, w.unit, 0, 0, '#333333', 0, { z: 0, turret: 0.6 }), 120);
       ctx.restore();
       if (w.t < 20 && Math.random() < 0.1) this.fx.smoke(w.x, w.y, 1, 4, 0.95);
       if (w.t < 6 && Math.random() < 0.15) this.fx.fire(w.x, w.y, 1, 3);
@@ -366,6 +378,51 @@ export class Renderer {
       ctx.fillStyle = 'rgba(255,140,40,0.07)'; ctx.fill(); ctx.strokeStyle = 'rgba(255,150,60,0.45)'; ctx.lineWidth = 1.5; ctx.stroke();
     }
     ctx.setLineDash([]);
+  }
+
+  // Bewegte Sandwellen auf allen Sandfeldern
+  drawSandDrift(ctx) {
+    const g = this.g;
+    if (!this.sandPath || this.sandPathRound !== 1) {
+      this.sandPath = new Path2D();
+      for (let r = 0; r < g.H; r++) for (let c = 0; c < g.W; c++) {
+        if (!g.isSand(c, r)) continue;
+        const p = center(c, r), pts = [];
+        for (let i = 0; i < 6; i++) { const a = Math.PI / 180 * (60 * i - 30); pts.push([p.x + (R + 1) * Math.cos(a), p.y + (R + 1) * Math.sin(a)]); }
+        this.sandPath.moveTo(pts[0][0], pts[0][1]); for (let i = 1; i < 6; i++) this.sandPath.lineTo(pts[i][0], pts[i][1]); this.sandPath.closePath();
+      }
+      this.sandPathRound = 1;
+      const pc = document.createElement('canvas'); pc.width = pc.height = 256;
+      const c = pc.getContext('2d');
+      for (let k = 0; k < 26; k++) {
+        const y0 = Math.random() * 256, amp = 3 + Math.random() * 5, ph = Math.random() * 6;
+        c.strokeStyle = Math.random() < 0.5 ? 'rgba(255,238,205,0.09)' : 'rgba(120,80,40,0.08)'; c.lineWidth = 1 + Math.random() * 1.5;
+        c.beginPath();
+        for (let x = -10; x <= 266; x += 8) { const y = y0 + Math.sin(x / 256 * 6.283 * 2 + ph) * amp; x < 0 ? c.moveTo(x, y) : c.lineTo(x, y); }
+        c.stroke();
+        c.beginPath(); for (let x = -10; x <= 266; x += 8) { const y = y0 - 256 + Math.sin(x / 256 * 6.283 * 2 + ph) * amp; x < 0 ? c.moveTo(x, y) : c.lineTo(x, y); } c.stroke();
+      }
+      this.sandPattern = ctx.createPattern(pc, 'repeat');
+    }
+    const off = this.t * 7;
+    this.sandPattern.setTransform(new DOMMatrix([1, 0.25, -0.15, 1, off, off * 0.3]));
+    ctx.save(); ctx.clip(this.sandPath); ctx.fillStyle = this.sandPattern;
+    const v = this.view; ctx.fillRect(v.x0, v.y0, v.x1 - v.x0, v.y1 - v.y0); ctx.restore();
+  }
+
+  // Wolkenschatten ziehen langsam über die Wüste
+  drawClouds(ctx, dt) {
+    const ms = this.g.map.size;
+    if (!this.clouds) this.clouds = Array.from({ length: 7 }, () => ({ x: Math.random() * ms.w, y: Math.random() * ms.h, r: 160 + Math.random() * 220, s: 6 + Math.random() * 8, sq: 0.5 + Math.random() * 0.3 }));
+    for (const c of this.clouds) {
+      c.x += c.s * dt; c.y += c.s * 0.25 * dt;
+      if (c.x - c.r > ms.w) { c.x = -c.r; c.y = Math.random() * ms.h; }
+      if (c.y - c.r > ms.h) c.y = -c.r;
+      ctx.save(); ctx.translate(c.x, c.y); ctx.scale(1, c.sq);
+      const gr = ctx.createRadialGradient(0, 0, c.r * 0.2, 0, 0, c.r);
+      gr.addColorStop(0, `rgba(40,25,15,${0.13 * (1 - this.nightK)})`); gr.addColorStop(1, 'rgba(40,25,15,0)');
+      ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(0, 0, c.r, 0, 6.28); ctx.fill(); ctx.restore();
+    }
   }
 
   // Wind: Sandschlieren über der Karte, Glutstaub in der Luft

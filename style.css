@@ -81,6 +81,13 @@ button.wide { width: 100%; margin-top: 8px; }
 
 #banner { position: absolute; left: 0; right: 0; top: 38%; text-align: center; pointer-events: none; z-index: 8; opacity: 0; transform: scale(0.96); transition: opacity .25s, transform .25s; }
 #banner.show { opacity: 1; transform: none; }
+#banner.show .b-main { animation: sweep .6s cubic-bezier(.2,.8,.2,1); }
+#banner.show .b-sub { animation: fadeup .7s .1s both; }
+#banner .b-main { position: relative; overflow: hidden; }
+#banner .b-main::after { content: ''; position: absolute; top: 0; bottom: 0; width: 40%; left: -50%; background: linear-gradient(90deg, transparent, rgba(255,220,170,0.35), transparent); animation: shine 1.1s .15s; }
+@keyframes sweep { from { clip-path: inset(0 50% 0 50%); letter-spacing: .4em; } to { clip-path: inset(0 0 0 0); letter-spacing: .12em; } }
+@keyframes fadeup { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes shine { from { left: -50%; } to { left: 120%; } }
 #banner .b-main { display: inline-block; padding: 10px 40px; font-size: 34px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: #fff4e4; background: linear-gradient(90deg, rgba(30,15,6,0), rgba(30,15,6,0.85) 20%, rgba(30,15,6,0.85) 80%, rgba(30,15,6,0)); text-shadow: 0 2px 12px rgba(255,140,50,0.6); }
 #banner .b-sub { margin-top: 4px; font-size: 14px; letter-spacing: .3em; text-transform: uppercase; color: var(--amber); }
 

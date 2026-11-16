@@ -2,7 +2,7 @@
 const R = Math.random;
 
 export class FX {
-  constructor() { this.p = []; this.decals = []; this.corpses = []; this.shake = 0; }
+  constructor() { this.p = []; this.decals = []; this.corpses = []; this.tracks = []; this.shake = 0; }
 
   add(o) {
     if (this.p.length > 3000) return;
@@ -60,10 +60,19 @@ export class FX {
     this.debris(x, y, Math.round(5 * size));
     this.decal(x, y, 10 * size + 4);
     this.shake = Math.max(this.shake, 2 * size);
+    if (size >= 1.1) {
+      // Feuerball und aufsteigende Rauchsäule
+      this.add({ kind: 'glow', x, y: y - 6, vy: -18, life: 0.6, size: 22 * size, grow: 18, col: '255,140,50', a: 0.9 });
+      for (let k = 0; k < 8 * size; k++) this.add({ kind: 'puff', x: x + (R() - 0.5) * 10, y: y - k * 3, vx: 4 + R() * 6, vy: -18 - R() * 14 - k * 2, life: 2.2 + R() * 1.6, size: 6 + R() * 5, grow: 10, col: `${45 + R() * 25 | 0},${40 + R() * 20 | 0},${36 + R() * 15 | 0}`, a: 0.55, air: true });
+    }
   }
   corpse(x, y, a, color, n = 2) {
     for (let k = 0; k < n; k++) this.corpses.push({ x: x + (Math.random() - 0.5) * 16, y: y + (Math.random() - 0.5) * 12, a: a + (Math.random() - 0.5) * 1.5, color, t: 0 });
     if (this.corpses.length > 60) this.corpses.splice(0, this.corpses.length - 60);
+  }
+  track(x, y, a, w = 7) {
+    this.tracks.push({ x, y, a, w, t: 0 });
+    if (this.tracks.length > 900) this.tracks.splice(0, 100);
   }
   decal(x, y, r) {
     this.decals.push({ x, y, r, a: 0.55, rot: R() * 6 });
@@ -88,11 +97,22 @@ export class FX {
     p.length = w;
     for (const d of this.decals) d.a = Math.max(0.15, d.a - dt * 0.004);
     for (const c of this.corpses) c.t += dt;
+    for (const k of this.tracks) k.t += dt;
+    if (this.tracks.length && this.tracks[0].t > 45) this.tracks = this.tracks.filter((k) => k.t < 45);
     if (this.corpses.length && this.corpses[0].t > 25) this.corpses = this.corpses.filter((c) => c.t < 25);
     this.shake = Math.max(0, this.shake - dt * 12);
   }
 
   drawDecals(ctx) {
+    ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+    for (const k of this.tracks) {
+      const a = (1 - k.t / 45) * 0.22, ca = Math.cos(k.a), sa = Math.sin(k.a), px = -sa * k.w, py = ca * k.w;
+      ctx.strokeStyle = `rgba(90,60,35,${a})`;
+      ctx.beginPath();
+      ctx.moveTo(k.x + px - ca * 3, k.y + py - sa * 3); ctx.lineTo(k.x + px + ca * 3, k.y + py + sa * 3);
+      ctx.moveTo(k.x - px - ca * 3, k.y - py - sa * 3); ctx.lineTo(k.x - px + ca * 3, k.y - py + sa * 3);
+      ctx.stroke();
+    }
     for (const c of this.corpses) {
       const a = Math.min(1, (25 - c.t) / 5) * 0.85;
       ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.a); ctx.globalAlpha = a;
