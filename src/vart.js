@@ -289,12 +289,12 @@ function angWing(c, side, len, chord, f, sweep, alpha) {
   c.save(); c.rotate(side * sweep);
   const P = [[-chord * 0.42, 0], [-chord * 0.5, side * L * 0.82], [-chord * 0.18, side * L], [chord * 0.32, side * L * 0.9], [chord * 0.45, side * L * 0.2], [chord * 0.4, 0]];
   const g = c.createLinearGradient(0, 0, 0, side * L);
-  g.addColorStop(0, `rgba(196,206,212,${0.85 * alpha})`); g.addColorStop(0.6, `rgba(170,184,192,${0.55 * alpha})`); g.addColorStop(1, `rgba(150,166,176,${0.35 * alpha})`);
+  g.addColorStop(0, `rgba(214,224,230,${0.7 * alpha})`); g.addColorStop(0.6, `rgba(190,204,212,${0.42 * alpha})`); g.addColorStop(1, `rgba(170,186,196,${0.25 * alpha})`);
   c.fillStyle = g; c.beginPath(); P.forEach(([x, y], i) => i ? c.lineTo(x, y) : c.moveTo(x, y)); c.closePath(); c.fill();
   // Rahmen: kräftige Vorderkante, Längsholm, Querrippen
-  c.strokeStyle = `rgba(40,44,50,${0.85 * alpha})`; c.lineWidth = 0.9;
+  c.strokeStyle = `rgba(52,58,64,${0.6 * alpha})`; c.lineWidth = 0.55;
   c.beginPath(); c.moveTo(P[0][0], P[0][1]); c.lineTo(P[1][0], P[1][1]); c.lineTo(P[2][0], P[2][1]); c.stroke();
-  c.lineWidth = 0.4; c.strokeStyle = `rgba(60,66,72,${0.4 * alpha})`;
+  c.lineWidth = 0.3; c.strokeStyle = `rgba(70,76,82,${0.3 * alpha})`;
   c.beginPath(); c.moveTo(0, 0); c.lineTo(-chord * 0.05, side * L * 0.94);
   for (let k = 1; k <= 2; k++) { const fy = k / 3; c.moveTo(-chord * (0.42 + 0.08 * fy), side * L * fy * 0.82); c.lineTo(chord * (0.4 - 0.05 * fy), side * L * fy * 0.86); }
   c.stroke();
@@ -305,31 +305,27 @@ function thopterArt(ctx, u, color, t, o, kind) {
   const def = THOPTER[kind];
   const p = part(`th2-${kind}-${color}`, def.size[0], def.size[1], (L) => L((c) => def.body(c, color), { bevel: 0.5, grime: 0.35 }));
   const z = o.z ?? 26, sc = def.scale, bank = o.bank || 0;
-  const ph = t * def.rate + u.id;
-  // vorderer und hinterer Satz schlagen gegenläufig, innerer und äußerer Flügel leicht versetzt
-  const fl = (off) => 0.3 + 0.7 * Math.abs(Math.cos(ph + off));
-  const drawWings = (alpha, shadow) => {
-    def.wings.forEach(([x, rootY, len, chord, sw0], si) => {
-      const sw = sw0 ?? (si ? 0.42 : -0.1);
-      const off = si ? Math.PI / 2 : 0;
-      for (const side of [-1, 1]) {
-        const lean = 1 - side * bank * 0.3;
-        for (const [k, dAng, la] of [[0, -0.16, 1], [0.6, 0.14, 0.92]]) {
-          c2(ctx, () => { ctx.translate(x, side * rootY); angWing(ctx, side, len * la * lean, chord, fl(off + k), sw + dAng * side * side, shadow ? 1 : alpha); });
-        }
-        if (!shadow) { // Bewegungsunschärfe als Fächer
-          ctx.save(); ctx.translate(x, side * rootY); ctx.fillStyle = `rgba(200,215,225,${0.07 * alpha})`;
-          ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, len * lean, side > 0 ? 1.2 - sw : -1.95 + sw, side > 0 ? 1.95 - sw : -1.2 + sw); ctx.closePath(); ctx.fill(); ctx.restore();
-        }
+  // Viele kleine Flügel: je Wurzel ein Fächer aus drei schmalen Flügeln, jeder mit eigenem Takt
+  const wl = wingList(def);
+  const fl = (w, side) => 0.25 + 0.75 * Math.abs(Math.cos(t * def.rate * w.rate + u.id + w.off + (side > 0 ? 0.9 : 0)));
+  const drawWings = (alpha) => {
+    for (const side of [-1, 1]) {
+      const lean = 1 - side * bank * 0.3;
+      for (const w of wl) c2(ctx, () => { ctx.translate(w.x, side * w.y); angWing(ctx, side, w.len * lean, w.chord, fl(w, side), w.sw, alpha); });
+      // Bewegungsunschärfe als Fächer je Wurzel
+      for (const [x, rootY, len, , sw0] of def.wings) {
+        const sw = sw0 ?? 0.15;
+        ctx.save(); ctx.translate(x, side * rootY); ctx.fillStyle = `rgba(200,215,225,${0.08 * alpha})`;
+        ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, len * 0.8 * lean, side > 0 ? 1.0 - sw : -2.15 + sw, side > 0 ? 2.15 - sw : -1.0 + sw); ctx.closePath(); ctx.fill(); ctx.restore();
       }
-    });
+    }
   };
   // Bodenschatten
   ctx.save(); ctx.translate(z * 0.35, z * 0.45); ctx.rotate(u.facing); ctx.scale(sc, sc);
   ctx.globalAlpha *= Math.max(0.1, 0.3 - z * 0.003);
   ctx.drawImage(p.sh, -p.w / 2, -p.h / 2, p.w, p.h);
   ctx.globalCompositeOperation = 'source-over'; ctx.filter = 'none';
-  const sa = ctx.globalAlpha; ctx.globalAlpha = sa * 0.6; drawWingsShadow(ctx, def, fl); ctx.globalAlpha = sa;
+  const sa = ctx.globalAlpha; ctx.globalAlpha = sa * 0.6; drawWingsShadow(ctx, wl, fl); ctx.globalAlpha = sa;
   ctx.restore();
   // Maschine
   ctx.save(); ctx.translate(0, -z); ctx.rotate(u.facing); ctx.scale(sc, sc);
@@ -341,18 +337,31 @@ function thopterArt(ctx, u, color, t, o, kind) {
     const ammo = u.ammo ?? 3, max = kind === 'bomber' ? 2 : 3;
     for (let k = 0; k < max; k++) { ctx.fillStyle = k < ammo ? '#ffb070' : '#3a3a3a'; ctx.fillRect(-4 + k * 2.4, -0.7, 1.4, 1.4); }
   }
-  drawWings(0.95, false);
+  drawWings(0.95);
   ctx.restore();
 }
 function c2(ctx, fn) { ctx.save(); fn(); ctx.restore(); }
-function drawWingsShadow(ctx, def, fl) {
-  ctx.fillStyle = '#000';
-  def.wings.forEach(([x, rootY, len, chord], si) => {
-    for (const side of [-1, 1]) {
-      const L = len * fl(si ? Math.PI / 2 : 0);
-      ctx.beginPath(); ctx.moveTo(x - chord * 0.4, side * rootY); ctx.lineTo(x - chord * 0.5, side * (rootY + L)); ctx.lineTo(x + chord * 0.35, side * (rootY + L * 0.9)); ctx.lineTo(x + chord * 0.4, side * rootY); ctx.closePath(); ctx.fill();
-    }
+const WL = new Map();
+function wingList(def) {
+  if (WL.has(def)) return WL.get(def);
+  const out = [];
+  def.wings.forEach(([x, rootY, len, chord, sw0], si) => {
+    const base = sw0 ?? (si ? 0.42 : -0.1);
+    [[-2.4, -0.4, 0.86], [0, 0, 0.92], [2.4, 0.4, 0.82]].forEach(([dx, da, lf], j) => {
+      out.push({ x: x + dx, y: rootY, len: len * lf, chord: chord * 0.72, sw: base + da, rate: 1 + 0.13 * j + 0.07 * si, off: si * 1.3 + j * 2.1 });
+    });
   });
+  WL.set(def, out);
+  return out;
+}
+function drawWingsShadow(ctx, wl, fl) {
+  ctx.fillStyle = '#000';
+  for (const side of [-1, 1]) for (const w of wl) {
+    const L = w.len * fl(w, side);
+    ctx.save(); ctx.translate(w.x, side * w.y); ctx.rotate(side * w.sw);
+    ctx.beginPath(); ctx.moveTo(-w.chord * 0.4, 0); ctx.lineTo(-w.chord * 0.5, side * L); ctx.lineTo(w.chord * 0.35, side * L * 0.9); ctx.lineTo(w.chord * 0.4, 0); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
 }
 
 // ---------- Zeichenfunktionen (Signatur wie DRAW in sprites.js) ----------
