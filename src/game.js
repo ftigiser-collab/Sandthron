@@ -1,5 +1,5 @@
 // Spielregeln und Zustand (rundenbasiert)
-import { UNITS, BUILDINGS, WEAPONS, ARMOR_MOD, TERRAIN, MOVE_COST, FACTIONS, START_CREDITS, DROPS, CARDS, WORM_SIZES, ORBITAL_STRIKE, SHIELD_PIERCE, POIS, ENDGAME, ENDGAME_ROUND, RANKS } from './data.js';
+import { UNITS, BUILDINGS, WEAPONS, ARMOR_MOD, TERRAIN, MOVE_COST, FACTIONS, START_CREDITS, DROPS, CARDS, WORM_SIZES, ORBITAL_STRIKE, SHIELD_PIERCE, POIS, ENDGAME, ENDGAME_ROUND, RANKS, RICH_MULT } from './data.js';
 import { neighbors, distance, ring, center } from './hex.js';
 const LANDED = {};
 const ang = (c1, r1, c2, r2) => { const a = center(c1, r1), b = center(c2, r2); return Math.atan2(b.y - a.y, b.x - a.x); };
@@ -10,6 +10,10 @@ let NEXT = 1;
 export class Game {
   constructor(map, opts = {}) {
     this.map = map; this.W = map.W; this.H = map.H;
+    // Tiefglut: Felder weit draußen, fern aller Startbasen, bringen mehr Credits pro Ladung
+    const farD = Math.max(7, Math.round(Math.min(this.W, this.H) * 0.42));
+    this.rich = new Uint8Array(this.W * this.H);
+    for (let r = 0; r < this.H; r++) for (let c = 0; c < this.W; c++) if ((map.starts || []).every((st) => distance(c, r, st.c, st.r) >= farD)) this.rich[r * this.W + c] = 1;
     this.rnd = mulberry32(map.seed * 7 + 3);
     this.units = []; this.buildings = []; this.worms = [];
     this.byId = new Map();
@@ -90,9 +94,13 @@ export class Game {
   terr(c, r) { return this.map.ter[this.i(c, r)]; }
   isSand(c, r) { return TERRAIN[this.terr(c, r)].sand; }
   spiceAt(c, r) { return this.map.spice[this.i(c, r)]; }
+  richAt(c, r) { return !!this.rich[this.i(c, r)]; }
+  spiceValue(c, r) { return this.richAt(c, r) ? RICH_MULT : 1; }
   get(id) { const e = this.byId.get(id); return e && !e.dead ? e : null; }
   cost(mt, c, r) { return MOVE_COST[mt][this.terr(c, r)]; }
-  unitAt(c, r, air) { return this.units.find((u) => !u.dead && !u.carried && u.c === c && u.r === r && (u.def.mt === 'air') === !!air) || null; }
+  unitAt(c, r, air) { return this.units.find((u) => !u.dead && !u.carried && !this.inHangar(u) && u.c === c && u.r === r && (u.def.mt === 'air') === !!air) || null; }
+  // Ernte-Träger, der in seiner Raffinerie verschwunden ist (unsichtbar, nicht angreifbar)
+  inHangar(u) { return !!(u.docked && u.def.harvOnly && !u.escort && !u.anim && this.buildings.some((b) => !b.dead && b.type === 'raffinerie' && b.owner === u.owner && b.c === u.c && b.r === u.r)); }
   buildingAt(c, r) { return this.buildings.find((b) => !b.dead && b.c === c && b.r === r) || null; }
   groundFree(c, r) { return !this.unitAt(c, r, false) && !this.buildingAt(c, r); }
   inStorm(c, r, s = this.storm) { return s && distance(c, r, s.c, s.r) <= s.rad; }
@@ -243,7 +251,7 @@ export class Game {
       const a = path[path.length - 2];
       u.facing = ang(a.c, a.r, c, r);
     }
-    u.c = c; u.r = r; u.moved = true;
+    u.c = c; u.r = r; u.moved = true; u.waitUntil = 0;
     const carried = this.get(u.carrying); if (carried) { carried.c = c; carried.r = r; if (carried.passengers) this.syncPassengers(carried); }
     if (u.passengers) this.syncPassengers(u);
     return path;
@@ -302,7 +310,7 @@ export class Game {
     const w = this.weapon(e); if (!w) return [];
     const out = [];
     for (const t of this.units) {
-      if (t.dead || t.carried || t.owner === e.owner || !this.canHit(w, t)) continue;
+      if (t.dead || t.carried || this.inHangar(t) || t.owner === e.owner || !this.canHit(w, t)) continue;
       if (onlyVisible && !this.visible[this.i(t.c, t.r)]) continue;
       if (this.stealthed(t, e.owner)) continue;
       if (this.inRange(w, c, r, t.c, t.r)) out.push(t);
@@ -438,7 +446,7 @@ export class Game {
       const c = this.get(e.carrying); if (c) this.kill(c, by);
       for (const id of e.passengers || []) { const pp = this.get(id); if (pp && !pp.dead) this.kill(pp, by); }
       e.passengers = [];
-      if (e.def.harvester && e.cargo > 0 && this.isSand(e.c, e.r)) this.map.spice[this.i(e.c, e.r)] += e.cargo;
+      if (e.def.harvester && e.cargo > 0 && this.isSand(e.c, e.r)) { this.map.spice[this.i(e.c, e.r)] += e.cargo; e.cargo = 0; e.cargoVal = 0; }
       this.say(`${e.def.name} verloren`, 'bad', e.owner);
     } else {
       this.say(`${e.def.name} zerstört`, 'bad', e.owner);
@@ -802,13 +810,13 @@ export class Game {
       const sp = this.spiceAt(u.c, u.r);
       if (sp > 0 && u.cargo < u.def.capacity && !u.carried) {
         const take = Math.min(u.def.rate, sp, u.def.capacity - u.cargo);
-        this.map.spice[this.i(u.c, u.r)] -= take; u.cargo += take; u.harvested = true;
+        this.map.spice[this.i(u.c, u.r)] -= take; u.cargo += take; u.cargoVal = (u.cargoVal ?? u.cargo - take) + take * this.spiceValue(u.c, u.r); u.harvested = true;
         ev.push({ type: 'harvest', u: u.id, amount: take });
       }
       const ref = this.buildings.find((b) => !b.dead && b.owner === owner && b.type === 'raffinerie' && b.turnsLeft <= 0 && distance(b.c, b.r, u.c, u.r) <= 1);
       if (ref && u.cargo > 0 && !u.carried) {
-        const amt = Math.round(u.cargo * p.incomeMult);
-        p.credits += amt; p.stats.harvested += u.cargo; u.cargo = 0;
+        const amt = Math.round((u.cargoVal ?? u.cargo) * p.incomeMult);
+        p.credits += amt; p.stats.harvested += u.cargo; u.cargo = 0; u.cargoVal = 0;
         ev.push({ type: 'unload', u: u.id, amount: amt, ref: ref.id });
       }
     }
@@ -894,6 +902,7 @@ export class Game {
       if (this.map.spice[i] > 0) this.map.spice[i] = Math.floor(this.map.spice[i] * 0.5);
       for (const u of this.units) {
         if (u.dead || u.carried || u.c !== c || u.r !== r) continue;
+        if (u.def.mt !== 'air' && this.poiAt(c, r)) continue; // Schlüsselorte bieten Schutz vor dem Sturm
         const t = this.terr(c, r);
         const dmg = u.def.mt === 'air' ? 55 : t === 'mountain' ? 0 : t === 'rock' ? 15 : 45;
         if (dmg) { u.hp -= dmg; hits.push({ id: u.id, dmg }); if (u.hp <= 0.5) this.kill(u); }

@@ -360,9 +360,27 @@ function thopterArt(ctx, u, color, t, o, kind) {
       const lean = 1 - side * bank * 0.3;
       for (const w of wl) {
         const root = [w.x, side * w.y];
-        if (!o.landed) for (const dp of [0.32, 0.64, 0.96]) blade(ctx, root, tipOf(w, side, theta(w, side, dp), lean), w.chord, alpha * (0.95 - dp * 0.7), 0.5, true);
-        const th = theta(w, side);
-        blade(ctx, root, tipOf(w, side, th, lean), w.chord, alpha, 0.5 + th * 0.45, false);
+        if (o.landed) { blade(ctx, root, tipOf(w, side, 0, lean), w.chord, alpha, 0.5, false); continue; }
+        // Im Flug schlagen die Blätter so schnell, dass nur noch eine Unschärfe-Fläche über den ganzen Schlagbereich bleibt.
+        // An den Umkehrpunkten verweilt das Blatt länger — dort ist der Schleier dichter, dazu zwei schwache Kanten.
+        const N = 10, tips = [];
+        for (let k = 0; k <= N; k++) tips.push(tipOf(w, side, -0.95 + 1.9 * k / N, lean));
+        const [ex, ey] = tips[N >> 1], ddx = ex - root[0], ddy = ey - root[1], LL = Math.hypot(ddx, ddy) || 1, hw = w.chord * 0.45;
+        const nx = -ddy / LL * hw, ny = ddx / LL * hw;
+        const flick = 0.85 + 0.15 * Math.sin(t * 37 + w.off * 5 + side);
+        const gr = ctx.createLinearGradient(tips[0][0], tips[0][1], tips[N][0], tips[N][1]);
+        gr.addColorStop(0, `rgba(205,200,188,${0.34 * alpha * flick})`); gr.addColorStop(0.18, `rgba(185,180,168,${0.14 * alpha})`);
+        gr.addColorStop(0.5, `rgba(170,166,156,${0.09 * alpha})`); gr.addColorStop(0.82, `rgba(150,146,136,${0.14 * alpha})`); gr.addColorStop(1, `rgba(120,116,108,${0.32 * alpha * flick})`);
+        const sheet = (f) => { ctx.beginPath(); ctx.moveTo(root[0] + nx * f, root[1] + ny * f); ctx.lineTo(tips[0][0] + nx * f * 0.8, tips[0][1] + ny * f * 0.8);
+          for (const [x, y] of tips) ctx.lineTo(x, y);
+          ctx.lineTo(tips[N][0] - nx * f * 0.8, tips[N][1] - ny * f * 0.8); ctx.lineTo(root[0] - nx * f, root[1] - ny * f); ctx.closePath(); ctx.fill(); };
+        ctx.fillStyle = gr; sheet(1.25); ctx.globalAlpha *= 0.5; sheet(0.6); ctx.globalAlpha /= 0.5;
+        // Speichen-Schlieren entlang der Blattkante (radiale Streifen)
+        ctx.strokeStyle = `rgba(230,226,214,${0.08 * alpha})`; ctx.lineWidth = 0.35; ctx.beginPath();
+        for (let k = 1; k < N; k += 2) { ctx.moveTo(root[0], root[1]); ctx.lineTo(tips[k][0], tips[k][1]); } ctx.stroke();
+        // schwache Blattkanten an den Umkehrpunkten, ein Hauch des aktuellen Blatts
+        for (const k of [0, N]) blade(ctx, root, tips[k], w.chord * 0.9, alpha * 0.5, 0.5, true);
+        blade(ctx, root, tipOf(w, side, theta(w, side), lean), w.chord, alpha * 0.3 * flick, 0.6, true);
       }
       // Flügelnaben
       for (const [x, rootY] of def.wings) { ctx.fillStyle = '#3a3630'; ctx.beginPath(); ctx.arc(x, side * rootY, 1.4, 0, 6.28); ctx.fill(); ctx.fillStyle = '#8a8478'; ctx.beginPath(); ctx.arc(x - 0.3, side * rootY - 0.3, 0.7, 0, 6.28); ctx.fill(); }
@@ -373,7 +391,7 @@ function thopterArt(ctx, u, color, t, o, kind) {
   ctx.globalAlpha *= Math.max(0.1, 0.3 - z * 0.003);
   ctx.drawImage(p.sh, -p.w / 2, -p.h / 2, p.w, p.h);
   ctx.globalCompositeOperation = 'source-over'; ctx.filter = 'none';
-  const sa = ctx.globalAlpha; ctx.globalAlpha = sa * 0.6; drawWingsShadow(ctx, wl, theta, o.landed); ctx.globalAlpha = sa;
+  const sa = ctx.globalAlpha; ctx.globalAlpha = sa * (o.landed ? 0.6 : 0.13); drawWingsShadow(ctx, wl, o.landed ? theta : () => 0, o.landed); ctx.globalAlpha = sa;
   ctx.restore();
   // Maschine
   ctx.save(); ctx.translate(0, -z); ctx.rotate(u.facing); ctx.scale(sc, sc);

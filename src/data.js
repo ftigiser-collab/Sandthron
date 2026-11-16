@@ -52,7 +52,7 @@ export const WEAPONS = {
   rifle:     { type: 'rifle', power: 50, range: [1, 1], ground: true, air: false, proj: 'bullet' },
   mg:        { type: 'mg', power: 52, range: [1, 1], ground: true, air: false, proj: 'bullet' },
   cannon:    { type: 'cannon', power: 72, range: [1, 1], ground: true, air: false, proj: 'shell' },
-  rocketInf: { type: 'rocket', power: 62, range: [1, 1], ground: true, air: true, proj: 'rocket' },
+  rocketInf: { type: 'rocket', power: 62, range: [1, 2], ground: true, air: true, proj: 'rocket' },
   artillery: { type: 'artillery', power: 78, range: [2, 4], ground: true, air: false, proj: 'arty', noMoveFire: true, noCounter: true },
   tmg:       { type: 'tmg', power: 48, range: [1, 1], ground: true, air: true, proj: 'bullet' },
   trocket:   { type: 'trocket', power: 70, range: [1, 1], ground: true, air: false, proj: 'rocket', ammo: true },
@@ -87,7 +87,7 @@ export const UNITS = {
   spion:   { name: 'Spion', cat: 'sis', move: 4, mt: 'foot', sight: 3, armor: 'inf', cost: 450, prereq: ['konvent'], vib: 0.3, stealth: 'always', infiltrate: true,
              desc: 'Unsichtbar außer aus nächster Nähe. Infiltriert ein angrenzendes feindliches Gebäude: 2 Runden Ausfall, stiehlt bis zu 400 Credits, deckt die Umgebung auf.' },
   rak:     { name: 'Raketentrupp', cat: 'inf', move: 2, mt: 'foot', sight: 2, armor: 'inf', weapon: 'rocketInf', cost: 250, prereq: ['kaserne'], vib: 1,
-             desc: 'Panzerabwehr zu Fuß. Trifft auch Thopter.' },
+             desc: 'Panzerabwehr zu Fuß, Reichweite 2. Trifft auch Thopter.' },
   trike:   { name: 'Sandläufer', cat: 'veh', move: 7, mt: 'wheel', sight: 3, armor: 'light', weapon: 'mg', cost: 350, prereq: ['fabrik'], vib: 2,
              desc: 'Schnellster Bodenspäher. Hasst Dünen.' },
   panzer:  { name: 'Kampfpanzer', cat: 'veh', move: 4, mt: 'track', sight: 2, armor: 'heavy', weapon: 'cannon', cost: 800, prereq: ['fabrik'], vib: 2,
@@ -232,3 +232,4 @@ export const CARDS = {
   sabotage:  { name: 'Sabotage', target: 'enemyBld', weight: 2, desc: 'Ein bekanntes feindliches Gebäude fällt eine Runde lang aus: keine Produktion, kein Strom, keine Abwehr.' },
   gilde:     { name: 'Gildenschuld', target: 'none', weight: 1, desc: 'Der nächste Orbital-Drop kostet nichts.' },
 };
+export const RICH_MULT = 1.75; // Tiefglut: Credits je Einheit Ladung

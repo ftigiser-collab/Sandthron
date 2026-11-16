@@ -516,7 +516,8 @@ export class Controller {
       this.r.ships.push(ring);
       await this.tween(2.6, (k) => { const e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2; ring.x = tgt.x + dir * 1400 - dir * 2800 * e; this.fx.shake = Math.max(this.fx.shake, 1.5); });
       this.r.ships = this.r.ships.filter((x) => x !== ring);
-      // 2. Landeschiffe: Legion kommt in drei Eiern, die anderen in einem großen Schiff
+      if (kind === 'egg') { await this.legionLanding(ev, units, tgt, col, dir); this.r.float(tgt.x, tgt.y - 60, `${ENDGAME[ev.faction].name} ist gelandet!`, ev.owner === 0 ? '#ffd28a' : '#ff7050', true); if (ev.owner === 0) { g.updateVision(); this.r.fogDirty = true; } return; }
+      // 2. Landeschiffe: ein großes Schiff
       const groups = kind === 'egg' ? [units.slice(0, 2), units.slice(2, 4), units.slice(4)] : [units];
       const ships = groups.filter((g2) => g2.length).map((g2, i) => {
         const ps = g2.map((u) => center(u.c, u.r)), cx = ps.reduce((a, p) => a + p.x, 0) / ps.length, cy = ps.reduce((a, p) => a + p.y, 0) / ps.length;
@@ -552,6 +553,60 @@ export class Controller {
       this.r.float(tgt.x, tgt.y - 60, `${ENDGAME[ev.faction].name} ist gelandet!`, ev.owner === 0 ? '#ffd28a' : '#ff7050', true);
     }
     if (ev.owner === 0) { g.updateVision(); this.r.fogDirty = true; }
+  }
+
+  // Kaiserliche Legion: eine Reihe gewaltiger, heller Kapselschiffe sinkt senkrecht aus dem Himmel, setzt im Sand auf
+  // und entlässt die Legion in Formation
+  async legionLanding(ev, units, tgt, col, dir) {
+    const g = this.g, N = 5, gap = 118, sc = 1.15;
+    // Die Schiffe stehen nebeneinander hinter der Landezone, Bug zur Truppe
+    const ps = units.map((u) => center(u.c, u.r));
+    const cx = ps.length ? ps.reduce((a, p) => a + p.x, 0) / ps.length : tgt.x, cy = ps.length ? Math.min(...ps.map((p) => p.y)) : tgt.y;
+    const groups = Array.from({ length: N }, () => []);
+    units.forEach((u, i) => groups[[2, 1, 3, 0, 4][i % N]].push(u));
+    const ships = groups.map((g2, i) => {
+      const off = (i - (N - 1) / 2), big = i === 2 ? 1.18 : 1;
+      const tx = cx + off * gap, ty = cy - 195 - Math.abs(off) * 22;
+      return { kind: 'egg', color: col, x: tx + dir * 30, y: ty, z: 1700 + Math.abs(off) * 120, scale: sc * big, alpha: 1, thrust: 0, beams: [], beamFront: true, rot: Math.PI / 2 + off * 0.06, glow: 0, hatch: 0, group: g2, delay: [0.5, 0.25, 0, 0.3, 0.55][i], tx, ty, sx: tx + dir * 30, sz: 1700 + Math.abs(off) * 120 };
+    });
+    this.r.float(tgt.x, tgt.y - 110, 'Schatten über dem Sand …', '#e8d2b0', true);
+    this.r.ships.push(...ships);
+    // Langsamer, schwerer Sinkflug: Schatten schärfen sich, der Boden bebt immer stärker
+    await this.tween(4.6, (k) => {
+      for (const sh of ships) {
+        const kk = Math.max(0, Math.min(1, (k - sh.delay * 0.3) / (1 - sh.delay * 0.3)));
+        const e = 1 - Math.pow(1 - kk, 3);
+        sh.z = sh.sz - (sh.sz - 6) * e; sh.x = sh.sx + (sh.tx - sh.sx) * e;
+        sh.glow = Math.max(0, 1 - sh.z / 300) * 0.8;
+        if (sh.z < 300 && sh.z > 8 && Math.random() < 0.6) { const a = Math.random() * 6.28, rr = (80 + Math.random() * 90) * sh.scale; this.fx.dust(sh.x + Math.cos(a) * rr * 0.5, sh.y + Math.sin(a) * rr, 1, '205,165,112', 55, 12); }
+        if (sh.z <= 6.5 && !sh.down) { sh.down = true; this.fx.sandBurst(sh.x, sh.y, 36, 100 * sh.scale, 22); this.fx.dust(sh.x, sh.y, 30, '205,165,112', 120 * sh.scale, 14); this.fx.shake = Math.max(this.fx.shake, 10); }
+      }
+      this.fx.shake = Math.max(this.fx.shake, 1 + 6 * k * k);
+    });
+    $('#app').classList.add('quake');
+    await this.wait(0.6);
+    $('#app').classList.remove('quake');
+    // Bugrampen öffnen sich, die Legion marschiert in Formation heraus
+    await this.tween(0.7, (k) => { for (const sh of ships) { sh.hatch = k; sh.glow = 0.8 * (1 - k * 0.6); } });
+    for (const sh of ships) sh.beams = sh.group.map((u) => { const p = center(u.c, u.r); return { x: p.x, y: p.y, a: 0 }; });
+    for (const sh of ships) for (let i = 0; i < sh.group.length; i++) {
+      const b = sh.beams[i];
+      await this.tween(0.3, (k) => { b.a = k * 0.7; });
+      sh.group[i].hidden = false; this.hitFlash(sh.group[i]); this.fx.dust(b.x, b.y, 12, '205,165,112', 40, 8);
+    }
+    this.r.float(tgt.x, tgt.y - 70, 'Die Legion steht.', '#ffd28a', true);
+    await this.wait(0.9);
+    await this.tween(0.5, (k) => { for (const sh of ships) { sh.hatch = 1 - k; for (const b of sh.beams) b.a = 0.7 * (1 - k); } });
+    // Senkrecht zurück in den Himmel, nacheinander
+    await this.tween(2.8, (k) => {
+      for (const sh of ships) {
+        const kk = Math.max(0, Math.min(1, (k - sh.delay * 0.35) / (1 - sh.delay * 0.35))), e = kk * kk * kk;
+        if (kk > 0 && !sh.up) { sh.up = true; this.fx.dust(sh.x, sh.y, 20, '205,165,112', 90 * sh.scale, 12); }
+        sh.z = 6 + 1800 * e; sh.glow = Math.max(0, 1 - sh.z / 300) * 0.5; sh.alpha = 1 - Math.max(0, kk - 0.7) * 3.3;
+      }
+      this.fx.shake = Math.max(this.fx.shake, 4 * (1 - k));
+    });
+    this.r.ships = this.r.ships.filter((s2) => !ships.includes(s2));
   }
 
   async doVoice(u, t) {
@@ -997,7 +1052,7 @@ export class Controller {
     // Auto-Träger und Auto-Ernter
     for (const u of g.ownUnits(0)) if (u.def.carrier && u.auto && !u.moved && !u.acted) await autoCarry(g, u, this.actAnimated);
     for (const u of g.ownUnits(0)) if (u.def.harvester && u.auto && !u.moved) await autoHarvest(g, u, this.actAnimated);
-    for (const u of g.ownUnits(0)) if (u.def.harvOnly) await carrierStation(g, u, this.actAnimated);
+    for (const u of g.ownUnits(0)) if (u.def.harvOnly) { const was = g.inHangar(u); await carrierStation(g, u, this.actAnimated); if (!was && g.inHangar(u)) { const p = center(u.c, u.r); this.fx.dust(p.x, p.y, 8, '200,170,130', 22, 5); } }
     await this.playEvents(g.endTurnEvents(0));
     if (this.checkEnd()) return;
     await this.playEvents(g.wormPhase());
@@ -1101,7 +1156,10 @@ export class Controller {
   }
 
   // Warnung, wenn noch Einheiten nicht bewegt wurden
-  idleUnits() { return this.g.ownUnits(0).filter((u) => !u.dead && !u.carried && !u.moved && !u.acted && !((u.def.harvester || u.def.carrier) && u.auto)); }
+  // Einheiten, die noch auf Befehle warten (ohne Ernte-Träger, Auto-Ernter und Einheiten im Wartemodus)
+  waiting(u) { return (u.waitUntil || 0) >= this.g.round; }
+  skipUnit(u) { return u.dead || u.carried || u.def.harvOnly || ((u.def.harvester || u.def.carrier) && u.auto) || this.waiting(u); }
+  idleUnits() { return this.g.ownUnits(0).filter((u) => !this.skipUnit(u) && !u.moved && !u.acted); }
   requestEndTurn() {
     const g = this.g;
     if (this.busy || g.current !== 0 || g.state !== 'play') return;
@@ -1121,7 +1179,7 @@ export class Controller {
 
   nextUnit() {
     const g = this.g;
-    const list = g.ownUnits(0).filter((u) => !u.acted && !u.carried && (!u.moved || g.canFire(u)) && !(u.def.harvester && u.auto && !u.moved));
+    const list = g.ownUnits(0).filter((u) => !u.acted && !this.skipUnit(u) && (!u.moved || g.canFire(u)));
     if (!list.length) { this.flash('Alle Einheiten haben gehandelt'); return; }
     const idx = list.indexOf(this.sel);
     const u = list[(idx + 1) % list.length];
@@ -1233,7 +1291,7 @@ export class Controller {
       bar.title = `Erzeugung ${p.powerProd} · Verbrauch ${p.powerUse}`;
       bar.classList.toggle('over', ratio > 1);
     }
-    const left = g.ownUnits(0).filter((u) => !u.acted && !u.carried && !u.moved && !(u.def.harvester && u.auto)).length;
+    const left = this.idleUnits().length;
     $('#nextunit').textContent = left ? `Nächste Einheit (${left})` : 'Nächste Einheit';
     const ob = $('#objectives');
     if (g.mission) {
@@ -1284,7 +1342,7 @@ export class Controller {
     const mc = (mt) => { const v = MOVE_COST[mt][g.terr(c, r)]; return v === Infinity ? '—' : v; };
     $('#panel').innerHTML = `<div class="p-head"><div><div class="p-name">${t.name}</div><div class="p-sub">Feld ${c}·${r}</div></div></div>
       <div class="p-grid"><span>Deckung</span><b>${Math.round(t.def * 100)} %</b><span>Bebaubar</span><b>${t.build ? 'ja' : 'nein'}</b>
-      <span>Wurmgebiet</span><b>${t.sand ? 'ja' : 'nein'}</b><span>Glut</span><b>${Math.round(sp)}</b>
+      <span>Wurmgebiet</span><b>${t.sand ? 'ja' : 'nein'}</b><span>${g.richAt(c, r) ? 'Tiefglut' : 'Glut'}</span><b>${Math.round(sp)}${g.richAt(c, r) && sp > 0 ? ' · ×1,75 Credits' : ''}</b>
       <span>Kosten Fuß/Rad/Kette</span><b>${mc('foot')}/${mc('wheel')}/${mc('track')}</b></div>
       ${g.inStorm(c, r) ? '<div class="p-warn">Im Sturm — unpassierbar</div>' : g.stormNext(c, r) ? '<div class="p-warn">Sturm zieht nächste Runde hierher</div>' : ''}${this.rallyBtn()}`;
     $('#panel').classList.add('show');
@@ -1359,7 +1417,7 @@ export class Controller {
         <span>Sicht</span><b>${e.def.sight}</b>
         ${w ? `<span>Waffe</span><b>Stärke ${w.power} · Reichweite ${w.range[0] === w.range[1] ? w.range[0] : w.range.join('–')}${w.air ? ' · Luft' : ''}${w.ground ? '' : ' (nur Luft)'}</b>` : ''}
         ${e.def.ammo ? `<span>Munition</span><b>${e.ammo} / ${e.def.ammo}</b>` : ''}
-        ${e.def.harvester ? `<span>Ladung</span><b>${Math.round(e.cargo)} / ${e.def.capacity}</b>` : ''}
+        ${e.def.harvester ? `<span>Ladung</span><b>${Math.round(e.cargo)} / ${e.def.capacity}${e.cargoVal > e.cargo + 1 ? ` · Wert ${Math.round(e.cargoVal)}` : ''}</b>` : ''}
         ${e.def.carrier ? `<span>Fracht</span><b>${e.carrying ? g.get(e.carrying)?.def.name : 'leer'}</b>` : ''}
         ${e.def.transport ? `<span>Insassen</span><b>${(e.passengers || []).map((id) => g.get(id)?.def.name).filter(Boolean).join(', ') || 'leer'} (${(e.passengers || []).length}/${e.def.transport})</b>` : ''}
         ${e.def.mt !== 'air' ? `<span>Gelände</span><b>${TERRAIN[g.terr(e.c, e.r)].name} (${Math.round(TERRAIN[g.terr(e.c, e.r)].def * 100)} % Deckung)</b>` : ''}
@@ -1386,6 +1444,7 @@ export class Controller {
           btns.push('<span class="hint">Fliegt Ernter selbstständig zwischen Glut und Raffinerie und rettet sie vor Würmern.</span>');
         }
         if (e.def.harvester) btns.push(this.g.units.some((x) => !x.dead && x.owner === 0 && x.def.harvOnly) ? '<button data-a="field">Glutfeld anfliegen</button>' : '');
+        if (e.def.harvester) { const car = this.carrierOf(e); if (car) btns.push(...this.carrierBtns(car, e)); }
         if (e.def.carrier && !e.def.harvOnly) btns.push(`<button data-a="auto" class="${e.auto ? 'on' : ''}">Auto-Transport: ${e.auto ? 'an' : 'aus'}</button>`);
         if (e.def.carrier && !e.def.harvOnly && !e.acted) {
           if (e.carrying) btns.push('<button data-a="drop">Absetzen</button>');
@@ -1399,7 +1458,8 @@ export class Controller {
         if (g.isFootInf(e) && !e.acted) { const apc = g.units.find((a) => g.canBoard(a, e)); if (apc) btns.push('<button data-a="embark">Einsteigen</button>'); }
         if (g.canLand(e)) btns.push('<button data-a="land">⬇ Landen</button>');
         if (e.landed) btns.push(g.canTakeoff(e) ? '<button data-a="takeoff" class="primary">⬆ Starten</button>' : '<button disabled>Gelandet — nächste Runde startbereit</button>');
-        if (!e.acted && !e.def.harvOnly) btns.push('<button data-a="wait">Warten</button>');
+        if (this.waiting(e)) btns.push('<button data-a="unwait">Warten beenden</button>');
+        else if (!e.acted && !e.def.harvOnly) btns.push('<button data-a="wait" title="Einheit bleibt diese und die nächsten zwei Runden in Wartestellung">Warten</button>');
         html += `<div class="p-actions">${btns.join('')}</div>`;
         const state = e.acted ? 'Hat gehandelt' : e.moved ? (g.canFire(e) ? 'Bewegt — kann noch angreifen' : 'Bewegt') : 'Bereit';
         html += `<div class="p-state">${state}</div>`;
@@ -1410,6 +1470,10 @@ export class Controller {
         ${e.turnsLeft > 0 ? `<span>Im Bau</span><b>noch ${e.turnsLeft} ${e.turnsLeft === 1 ? 'Runde' : 'Runden'}</b>` : ''}
         ${e.producing ? `<span>Produziert</span><b>${UNITS[e.producing].name} (nächste Runde)</b>` : ''}</div>
         <div class="p-desc">${e.def.desc}</div>`;
+      if (own && e.type === 'raffinerie') {
+        const cars = g.ownUnits(0).filter((u) => u.def.harvOnly && u.docked && u.c === e.c && u.r === e.r);
+        if (cars.length) html += `<div class="p-title">Ernte-Träger im Hangar</div><div class="p-actions">${cars.flatMap((car) => this.carrierBtns(car, null)).join('')}</div>`;
+      }
       if (own && g.current === 0 && e.turnsLeft <= 0) html += this.buildMenuHtml(e);
     }
     if (e.isUnit) html += `<div class="p-detail">${this.profileHtml('unit', e.type)}</div>`;
@@ -1534,7 +1598,26 @@ export class Controller {
     $('#panel').classList.remove('show');
   }
 
+  // Ernte-Träger zum Sammler finden (zugewiesen oder nächster freier)
+  carrierOf(h) {
+    const cars = this.g.ownUnits(h.owner).filter((u) => u.def.harvOnly && !u.dead);
+    return cars.find((u) => u.assigned === h.id) || cars.sort((a, b) => distance(a.c, a.r, h.c, h.r) - distance(b.c, b.r, h.c, h.r))[0] || null;
+  }
+  carrierBtns(car, h) {
+    const t = `${car.id}:${h ? h.id : ''}`;
+    return [`<button data-a="cescort" data-t="${t}" class="${car.escort ? 'on' : ''}">Träger beim Sammler: ${car.escort ? 'an' : 'aus'}</button>`,
+      car.acted ? '<button disabled>Träger ist diese Runde schon geflogen</button>' : `<button data-a="cevac" data-t="${t}" class="purple">Sammler evakuieren</button>`];
+  }
   panelAction(a, t, e) {
+    if (a === 'cescort' || a === 'cevac') {
+      const g = this.g, [cid, hid] = String(t).split(':'), car = g.get(+cid); if (!car) return;
+      if (hid) car.assigned = +hid;
+      if (a === 'cevac') { this.evacuate(car); return; }
+      car.escort = !car.escort;
+      if (car.escort && !g.get(car.assigned)) { const h = g.ownUnits(0).filter((x) => x.def.harvester).sort((p, q) => distance(p.c, p.r, car.c, car.r) - distance(q.c, q.r, car.c, car.r))[0]; if (h) car.assigned = h.id; }
+      this.flash(car.escort ? 'Der Träger bleibt künftig beim Sammler' : 'Der Träger verschwindet künftig in der Raffinerie, bis er gebraucht wird');
+      this.showPanel(e); return;
+    }
     const g = this.g;
     if (this.busy && a !== 'close') return;
     if (a === 'close') { this.deselect(); return; }
@@ -1545,8 +1628,9 @@ export class Controller {
       if (kind === 'bld') this.startBuild(type, true);
       return;
     }
-    if (a === 'wait') { e.acted = true; e.moved = true; this.deselect(); this.refresh(); return; }
-    if (a === 'escort') { e.escort = !e.escort; if (e.escort && !g.get(e.assigned)) { const h = g.ownUnits(0).filter((x) => x.def.harvester).sort((p, q) => distance(q.c, q.r, e.c, e.r) - distance(p.c, p.r, e.c, e.r))[0]; if (h) e.assigned = h.id; } this.flash(e.escort ? 'Der Träger bleibt künftig beim Sammler' : 'Der Träger parkt künftig auf der Raffinerie'); this.showPanel(e); return; }
+    if (a === 'wait') { e.acted = true; e.moved = true; e.waitUntil = g.round + 2; this.deselect(); this.refresh(); return; }
+    if (a === 'unwait') { e.waitUntil = 0; this.select(e); this.refresh(); return; }
+    if (a === 'escort') { e.escort = !e.escort; if (e.escort && !g.get(e.assigned)) { const h = g.ownUnits(0).filter((x) => x.def.harvester).sort((p, q) => distance(q.c, q.r, e.c, e.r) - distance(p.c, p.r, e.c, e.r))[0]; if (h) e.assigned = h.id; } this.flash(e.escort ? 'Der Träger bleibt künftig beim Sammler' : 'Der Träger verschwindet künftig in der Raffinerie, bis er gebraucht wird'); this.showPanel(e); return; }
     if (a === 'evac') { this.evacuate(e); return; }
     if (a === 'board') { this.clearHL(); this.r.hl.sel = e; this.mode = 'board'; this.r.hl.target = g.units.filter((t) => g.canBoard(e, t)).map((t) => [t.c, t.r]); this.flash('Trupp neben dem Transporter antippen'); return; }
     if (a === 'unload') { this.clearHL(); this.r.hl.sel = e; this.mode = 'unload'; this.r.hl.target = g.unloadHexes(e); this.flash('Freies Nachbarfeld zum Aussteigen antippen'); return; }
@@ -1616,11 +1700,11 @@ export class Controller {
     for (let r = 0; r < g.H; r++) for (let c = 0; c < g.W; c++) {
       const i = g.i(c, r), p = center(c, r);
       if (!g.explored[i]) { ctx.fillStyle = 'rgba(6,4,8,0.95)'; ctx.fillRect((p.x - R) * sx, (p.y - R) * sy, R * 2 * sx + 1, R * 2 * sy + 1); continue; }
-      if (g.spiceAt(c, r) > 0) { ctx.fillStyle = 'rgba(220,100,40,0.8)'; ctx.fillRect((p.x - 10) * sx, (p.y - 10) * sy, 20 * sx + 1, 20 * sy + 1); }
+      if (g.spiceAt(c, r) > 0) { ctx.fillStyle = g.richAt(c, r) ? 'rgba(200,60,140,0.85)' : 'rgba(220,100,40,0.8)'; ctx.fillRect((p.x - 10) * sx, (p.y - 10) * sy, 20 * sx + 1, 20 * sy + 1); }
       if (!g.visible[i]) { ctx.fillStyle = 'rgba(6,4,8,0.4)'; ctx.fillRect((p.x - R) * sx, (p.y - R) * sy, R * 2 * sx + 1, R * 2 * sy + 1); }
     }
     for (const b of g.buildings) if (g.seen(b)) { const p = center(b.c, b.r); ctx.fillStyle = g.players[b.owner].color; ctx.fillRect(p.x * sx - 3, p.y * sy - 3, 6, 6); }
-    for (const u of g.units) if (!u.carried && g.seen(u)) { const p = center(u.c, u.r); ctx.fillStyle = g.players[u.owner].color; ctx.beginPath(); ctx.arc(p.x * sx, p.y * sy, 2, 0, 6.28); ctx.fill(); }
+    for (const u of g.units) if (!u.carried && !g.inHangar(u) && g.seen(u)) { const p = center(u.c, u.r); ctx.fillStyle = g.players[u.owner].color; ctx.beginPath(); ctx.arc(p.x * sx, p.y * sy, 2, 0, 6.28); ctx.fill(); }
     for (const po of g.pois || []) { const p = center(po.c, po.r); ctx.save(); ctx.translate(p.x * sx, p.y * sy); ctx.rotate(0.785); ctx.fillStyle = po.owner >= 0 ? g.players[po.owner].color : '#e8dcc4'; ctx.strokeStyle = '#111'; ctx.lineWidth = 1; ctx.fillRect(-3.5, -3.5, 7, 7); ctx.strokeRect(-3.5, -3.5, 7, 7); ctx.restore(); }
     for (const w of g.worms) if (g.wormSeen(w)) { const p = center(w.c, w.r); ctx.strokeStyle = '#ffcc66'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(p.x * sx, p.y * sy, 3.5, 0, 6.28); ctx.stroke(); }
     const s = g.storm; if (s) { const p = center(s.c, s.r); ctx.fillStyle = 'rgba(200,130,60,0.45)'; ctx.beginPath(); ctx.arc(p.x * sx, p.y * sy, (s.rad + 0.5) * 66 * sx, 0, 6.28); ctx.fill(); }

@@ -56,7 +56,7 @@ export async function autoHarvest(g, u, act) {
     for (let r = 0; r < g.H; r++) for (let c = 0; c < g.W; c++) {
       if (g.spiceAt(c, r) <= 0) continue;
       const occ = g.unitAt(c, r, false); if (occ && occ !== u) continue;
-      const d = field.d[g.i(c, r)] + danger(c, r) * 3;
+      const d = field.d[g.i(c, r)] + danger(c, r) * 3 - (g.richAt(c, r) ? 2 : 0);
       if (d < bd) { bd = d; target = [c, r]; }
     }
   }
@@ -126,7 +126,7 @@ export async function autoCarry(g, car, act, forced = null) {
       let score;
       if (goal === 'ref') score = refs.some((b) => distance(b.c, b.r, c, r) <= 1) ? n.cost : Infinity;
       else if (want) score = g.spiceAt(c, r) > 0 ? n.cost * 0.1 + distance(c, r, want[0], want[1]) * 5 : Infinity;
-      else score = g.spiceAt(c, r) > 0 && !g.unitAt(c, r, false) ? n.cost - wd * 0.3 - g.spiceAt(c, r) * 0.002 : Infinity;
+      else score = g.spiceAt(c, r) > 0 && !g.unitAt(c, r, false) ? n.cost - wd * 0.3 - g.spiceAt(c, r) * 0.002 - (g.richAt(c, r) ? 3 : 0) : Infinity;
       if (score < dd) { dd = score; dest = { n, c, r }; }
     }
   }
@@ -177,7 +177,7 @@ export async function aiTurn(g, act, owner = 1) {
   const myB = g.buildings.filter((b) => !b.dead && b.owner === owner);
   const home = myB.find((b) => b.type === 'bauhof') || myB[0];
   const enemyB = g.buildings.filter((b) => !b.dead && b.owner === enemy);
-  const enemyU = g.units.filter((u) => !u.dead && u.owner === enemy && !u.carried);
+  const enemyU = g.units.filter((u) => !u.dead && u.owner !== owner && !u.carried && g.players[u.owner] && !g.players[u.owner].out);
   // Bedrohungen kommen von allen Gegnern
   const threats = g.units.filter((e) => !e.dead && !e.carried && e.owner !== owner && myB.some((b) => distance(b.c, b.r, e.c, e.r) <= 6));
   const army = mine.filter((u) => g.weapon(u) && !u.def.harvester);
@@ -195,6 +195,21 @@ export async function aiTurn(g, act, owner = 1) {
   for (const u of mine) {
     if (u.dead || u.acted || u.moved || g.aiPassive) continue;
     if (u.def.capture || u.def.infiltrate) await specialAct(g, u, act);
+  }
+  // Angriffsziel einmal für die ganze Armee: Ernter und Raffinerien zuerst, wenig verteidigte Ziele bevorzugt
+  let attackGoal = null, front = null;
+  if (mode === 'attack' && army.length) {
+    const foeAll = g.buildings.filter((b) => !b.dead && b.owner !== owner && g.players[b.owner] && !g.players[b.owner].out);
+    const foeHarv = g.units.filter((t) => !t.dead && !t.carried && t.owner !== owner && t.def.harvester);
+    const cx = army.reduce((a, u) => a + u.c, 0) / army.length, cy = army.reduce((a, u) => a + u.r, 0) / army.length;
+    let bsc = Infinity;
+    for (const t of [...foeAll, ...foeHarv]) {
+      const towers = foeAll.filter((b) => b.def.weapon && distance(b.c, b.r, t.c, t.r) <= 3).length;
+      const prio = t.isUnit ? -6 : t.type === 'raffinerie' ? -4 : t.type === 'bauhof' ? -2 : t.def.weapon ? 1 : 0;
+      const sc = distance(Math.round(cx), Math.round(cy), t.c, t.r) + towers * 3 + prio;
+      if (sc < bsc) { bsc = sc; attackGoal = t; }
+    }
+    if (attackGoal) { const ds = army.filter((u) => !g.isAir(u)).map((u) => distance(u.c, u.r, attackGoal.c, attackGoal.r)).sort((a, b) => a - b); front = ds.length ? ds[Math.floor(ds.length / 2)] : null; }
   }
   const order = [...army].sort((a, b) => (g.weapon(b).range[1] - g.weapon(a).range[1]));
   for (const u of order) {
@@ -225,7 +240,17 @@ export async function aiTurn(g, act, owner = 1) {
       if (ts.length && value(g, ts[0]) >= 300) { await act.voice(u, ts[0]); continue; }
     }
     const ck = g.round + '-' + owner; if (g._poiCk !== ck) { g._poiCk = ck; g._poiClaims = new Set(); }
-    await unitAct(g, u, act, mode, { threats, enemyB, enemyU, stage, home, poiClaims: g._poiClaims });
+    await unitAct(g, u, act, mode, { threats, enemyB, enemyU, stage, home, poiClaims: g._poiClaims, attackGoal, front });
+  }
+  // Geschütz- und Raketentürme feuern aktiv auf das lohnendste Ziel
+  for (const b of g.buildings) {
+    if (b.dead || b.owner !== owner || !b.def.weapon || !g.canFire(b) || g.state !== 'play') continue;
+    let bt = null, b2 = 0;
+    for (const t of g.targetsFrom(b, b.c, b.r, false)) {
+      const f = g.forecast(b, t); let sc = f.dmg / 100 * value(g, t) + (f.kills ? value(g, t) * 0.5 : 0) + (t.isUnit ? (100 - t.hp) * 2 : 0);
+      if (sc > b2) { b2 = sc; bt = t; }
+    }
+    if (bt) await act.attack(b, bt);
   }
   for (const u of mine) if (u.def.carrier && !u.dead) await autoCarry(g, u, act);
   for (const u of mine) if (u.def.harvOnly && !u.dead) await carrierStation(g, u, act);
@@ -260,7 +285,10 @@ async function unitAct(g, u, act, mode, ctx) {
     for (const t of ts) {
       const f = g.forecast(u, t, n.c, n.r);
       let s = f.dmg / 100 * value(g, t) - f.counter / 100 * value(g, u) * 0.9;
-      if (f.kills) s += value(g, t) * 0.4;
+      if (f.kills) s += value(g, t) * 0.5;
+      if (t.isUnit) s += (100 - t.hp) * value(g, t) * 0.002; // Fokusfeuer auf Angeschlagene
+      if (t.def && t.def.harvester) s += 120;                 // Wirtschaft des Gegners treffen
+      if (u.hp < 40 && !f.kills) s -= 80;                     // Angeschlagene riskieren weniger
       s -= danger(n.c, n.r) * 60;
       if (!g.isAir(u)) s += g.terr(n.c, n.r) === 'rock' ? 10 : g.terr(n.c, n.r) === 'mountain' ? 20 : 0;
       s -= n.cost * 2;
@@ -271,6 +299,20 @@ async function unitAct(g, u, act, mode, ctx) {
     if (best.n.c !== u.c || best.n.r !== u.r) await act.move(u, best.n.c, best.n.r, reach);
     if (!u.dead && !best.t.dead) await act.attack(u, best.t);
     return;
+  }
+  // Schwer angeschlagen und kein lohnender Angriff: zurückziehen (Heiligtum heilt, sonst Richtung Basis aus der Gefahr)
+  if (u.hp < 35 && !g.isAir(u) && ctx.home) {
+    const shrine = (g.pois || []).find((p) => p.type === 'heiligtum' && p.owner === u.owner);
+    const foes = (ctx.enemyU || []).filter((t) => !t.dead);
+    const goalR = shrine && distance(u.c, u.r, shrine.c, shrine.r) <= 10 ? shrine : ctx.home;
+    let bestN = null, bsc = Infinity;
+    for (const n of reach.values()) {
+      if (!n.end) continue;
+      const fd = foes.length ? Math.min(...foes.map((t) => distance(n.c, n.r, t.c, t.r))) : 9;
+      const sc = distance(n.c, n.r, goalR.c, goalR.r) * 1.2 - Math.min(fd, 5) * 2.5 + danger(n.c, n.r) * 4;
+      if (sc < bsc) { bsc = sc; bestN = n; }
+    }
+    if (bestN && (bestN.c !== u.c || bestN.r !== u.r)) { await act.move(u, bestN.c, bestN.r, reach); return; }
   }
   // Schlüsselorte: halten bzw. einnehmen
   let poiGoal = null;
@@ -286,7 +328,7 @@ async function unitAct(g, u, act, mode, ctx) {
   let goal = poiGoal;
   if (goal) { /* Schlüsselort */ }
   else if (mode === 'defend' && ctx.threats.length) goal = nearest(u, ctx.threats.filter((t) => !t.dead));
-  else if (mode === 'attack') goal = nearest(u, ctx.enemyB.filter((b) => !b.dead)) || nearest(u, ctx.enemyU.filter((t) => !t.dead));
+  else if (mode === 'attack') goal = ctx.attackGoal || nearest(u, ctx.enemyB.filter((b) => !b.dead)) || nearest(u, ctx.enemyU.filter((t) => !t.dead));
   else if (ctx.stage) goal = ctx.stage;
   if (!goal) return;
   const field = g.distanceField(u, (c, r) => danger(c, r) * 2);
@@ -297,6 +339,8 @@ async function unitAct(g, u, act, mode, ctx) {
     for (const [c, r] of neighbors(goal.c, goal.r, g.W, g.H)) if (field.d[g.i(c, r)] < bd) { bd = field.d[g.i(c, r)]; tc = c; tr = r; }
   }
   if (mode === 'gather' && distance(u.c, u.r, tc, tr) <= 2) return;
+  // Geschlossen vorrücken: nicht mehr als drei Felder vor dem Pulk der Armee
+  if (mode === 'attack' && ctx.front != null && !g.isAir(u) && distance(u.c, u.r, tc, tr) < ctx.front - 3) return;
   const step = g.stepToward(u, field, tc, tr, reach);
   if (step && (step.c !== u.c || step.r !== u.r)) {
     await act.move(u, step.c, step.r, reach);
@@ -321,7 +365,13 @@ export function aiBuild(g, owner) {
   const tally = {};
   for (const b of g.buildings) if (!b.dead && b.owner === owner) tally[b.type] = (tally[b.type] || 0) + 1;
   let want = null;
+  // Akute Bedrohung an der Basis: passende Verteidigung zuerst
+  const myB = g.buildings.filter((b) => !b.dead && b.owner === owner);
+  const near = g.units.filter((e) => !e.dead && !e.carried && e.owner !== owner && myB.some((b) => distance(b.c, b.r, e.c, e.r) <= 5));
+  const veh = near.filter((e) => e.def.cat === 'veh').length, air = near.filter((e) => e.def.mt === 'air').length, inf = near.length - veh - air;
+  const defense = air >= 2 && g.prereqOk(owner, BUILDINGS.flak) ? 'flak' : veh >= 2 && g.prereqOk(owner, BUILDINGS.raketenturm) ? 'raketenturm' : (inf + veh) >= 2 ? 'turm' : null;
   if (p.low || p.powerProd - p.powerUse < 15) want = 'windfalle';
+  else if (defense && p.credits >= BUILDINGS[defense].cost) want = defense;
   else {
     const need = {};
     for (const t of PLAN) { need[t] = (need[t] || 0) + 1; if ((tally[t] || 0) < need[t]) { want = t; break; } }
@@ -336,6 +386,7 @@ export function aiBuild(g, owner) {
   for (const [c, r] of hexes) {
     let s = -distance(c, r, home.c, home.r) * 2 + g.rnd() * 1.5;
     if (def.weapon) s = -distance(c, r, foe.c, foe.r) * 1.2 - distance(c, r, home.c, home.r) * 0.6 + g.rnd();
+    if (def.weapon && near.length) s = -Math.min(...near.map((e) => distance(c, r, e.c, e.r))) * 2 - distance(c, r, home.c, home.r) * 0.4 + g.rnd();
     if (want === 'raffinerie') { // nahe Glut
       let near = 99;
       for (let rr = 0; rr < g.H; rr++) for (let cc = 0; cc < g.W; cc++) if (g.spiceAt(cc, rr) > 0) near = Math.min(near, distance(c, r, cc, rr));
@@ -363,7 +414,9 @@ export function aiProduce(g, owner) {
       else if (harvesters < Math.min(4, refs * 2)) opts = [['ernter', 10]];
     } else if (b.def.produces === 'veh') {
       const foeAir = g.units.filter((u) => !u.dead && u.owner !== owner && u.def.mt === 'air').length;
-      opts = [['panzer', 4], ['trike', 1], ['werfer', 2], ['laserpanzer', 2], ['koloss', 1], ['brenner', 3], ['flakwagen', foeAir ? 3 : 0]];
+      const foeInf = g.units.filter((u) => !u.dead && u.owner !== owner && u.def.cat === 'inf').length;
+      const foeVeh = g.units.filter((u) => !u.dead && u.owner !== owner && u.def.cat === 'veh' && !u.def.harvester).length;
+      opts = [['panzer', 4 + (foeVeh > foeInf ? 2 : 0)], ['trike', 1], ['werfer', 2 + (foeInf > 4 ? 1 : 0)], ['laserpanzer', 2 + (foeVeh > 3 ? 2 : 0)], ['koloss', 1 + (g.round > 12 ? 1 : 0)], ['brenner', 2 + (foeInf > foeVeh ? 3 : 0)], ['flakwagen', foeAir ? 2 + foeAir : 0]];
     } else if (b.def.produces === 'sv') {
       const n = (t) => g.ownUnits(owner).filter((u) => u.type === t).length;
       opts = [['duenen', 3], ['todes', 2], ['wurmreiter', n('wurmreiter') < 1 ? 2 : 0]];
@@ -375,7 +428,8 @@ export function aiProduce(g, owner) {
       if (!threatened && ((!hasFab && p.credits < 1900) || infN >= 7 || (hasFab && g.rnd() < 0.5))) opts = [];
       else {
         const n = (t) => g.ownUnits(owner).filter((u) => u.type === t).length;
-        opts = [['inf', 2], ['rak', 2], ['scharf', 2], ['schild', 2], ['schatten', 2], ['pionier', n('pionier') < 1 ? 1 : 0], ['sandgaenger', n('sandgaenger') < 2 ? 1 : 0]];
+        const foeVeh = g.units.filter((u) => !u.dead && u.owner !== owner && u.def.cat === 'veh' && !u.def.harvester).length;
+        opts = [['inf', 2], ['rak', 2 + Math.min(4, foeVeh)], ['scharf', 2], ['schild', 2], ['schatten', 2], ['pionier', n('pionier') < 1 ? 1 : 0], ['sandgaenger', n('sandgaenger') < 2 ? 1 : 0]];
       }
     }
     else if (b.def.produces === 'air') {

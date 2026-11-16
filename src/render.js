@@ -21,6 +21,14 @@ export class Renderer {
     this.t = 0;
     this.fogDirty = true;
     this.spiceSprites = this.makeSpiceSprites();
+    // Tiefglut: gleiche Formen, tiefrot-violett umgefärbt
+    this.richSprites = this.spiceSprites.map((spr) => {
+      const cv = document.createElement('canvas'); cv.width = spr.width; cv.height = spr.height; const c = cv.getContext('2d');
+      c.drawImage(spr, 0, 0); c.globalCompositeOperation = 'color'; c.fillStyle = '#a0284c'; c.fillRect(0, 0, cv.width, cv.height);
+      c.globalCompositeOperation = 'multiply'; c.fillStyle = 'rgb(150,80,120)'; c.fillRect(0, 0, cv.width, cv.height);
+      c.globalCompositeOperation = 'destination-in'; c.drawImage(spr, 0, 0);
+      return cv;
+    });
     this.wrecks = []; this.rubble = []; this.bolts = [];
     this.light = [255, 255, 255]; this.nightK = 0;
     this.stormParticles = Array.from({ length: 160 }, () => ({ a: Math.random() * 6.28, d: Math.random(), s: 0.5 + Math.random(), y: Math.random() }));
@@ -123,7 +131,7 @@ export class Renderer {
     const ctx = cv.getContext('2d'); ctx.clearRect(0, 0, cv.width, cv.height);
     for (let r = 0; r < g.H; r++) for (let c = 0; c < g.W; c++) {
       const sp = g.spiceAt(c, r); if (sp <= 0 || !g.explored[g.i(c, r)]) continue;
-      const p = center(c, r), spr = this.spiceSprites[(c * 7 + r * 13) % 6];
+      const p = center(c, r), spr = (g.richAt(c, r) ? this.richSprites : this.spiceSprites)[(c * 7 + r * 13) % 6];
       ctx.globalAlpha = clamp(0.25 + sp / 700, 0.3, 1);
       ctx.save(); ctx.translate(p.x, p.y); ctx.rotate((c * 2.3 + r * 1.7) % 6.28); ctx.drawImage(spr, -spr.width / 2, -spr.height / 2); ctx.restore();
     }
@@ -187,7 +195,7 @@ export class Renderer {
       if (Math.random() > 0.012) continue;
       const sp = g.spiceAt(c, r); if (sp <= 0 || !g.explored[g.i(c, r)]) continue;
       const p = center(c, r); if (p.x < view.x0 || p.x > view.x1 || p.y < view.y0 || p.y > view.y1) continue;
-      this.fx.add({ kind: 'glow', x: p.x + (Math.random() - 0.5) * R, y: p.y + (Math.random() - 0.5) * R, vy: -6, life: 0.9, size: 2.5, grow: 1, col: '255,170,90', a: 0.9 });
+      this.fx.add({ kind: 'glow', x: p.x + (Math.random() - 0.5) * R, y: p.y + (Math.random() - 0.5) * R, vy: -6, life: 0.9, size: 2.5, grow: 1, col: g.richAt(c, r) ? '255,90,170' : '255,170,90', a: 0.9 });
     }
 
     // Raster
@@ -290,7 +298,7 @@ export class Renderer {
     }
 
     // Bodeneinheiten
-    const visU = g.units.filter((u) => !u.gone && !u.carried && !u.hidden && (g.seen(u) || u.forceShow));
+    const visU = g.units.filter((u) => !u.gone && !u.carried && !u.hidden && !g.inHangar(u) && (g.seen(u) || u.forceShow));
     const ground = visU.filter((u) => u.def.mt !== 'air').sort((a, b) => this.posOf(a).y - this.posOf(b).y);
     const air = visU.filter((u) => u.def.mt === 'air').sort((a, b) => this.posOf(a).y - this.posOf(b).y);
     for (const u of ground) this.drawUnitFull(ctx, u);
@@ -477,13 +485,19 @@ export class Renderer {
 
   drawBadges(ctx, e) {
     const g = this.g;
-    if (e.gone || (e.isUnit && e.carried)) return;
+    if (e.gone || (e.isUnit && (e.carried || g.inHangar(e)))) return;
     const p = this.posOf(e);
     const pct = e.isBuilding ? e.hp / e.maxHp * 100 : e.hp;
     const air = e.isUnit && e.def.mt === 'air' ? (e.z ?? 26) : 0;
     const col = g.players[e.owner].color;
     // Team-Marker
     ctx.fillStyle = col; ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 1;
+    if (e.isUnit && e.owner === 0 && (e.waitUntil || 0) >= g.round) {
+      const x = p.x - 18, y = p.y - 16 - air;
+      ctx.save(); ctx.fillStyle = 'rgba(10,10,12,0.8)'; ctx.beginPath(); ctx.roundRect(x - 7, y - 6, 16, 12, 3); ctx.fill();
+      ctx.fillStyle = '#bcd4ff'; ctx.font = 'bold 9px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('Zz', x + 1, y + 0.5); ctx.restore();
+      ctx.fillStyle = col;
+    }
     if (pct < 99.5) {
       const v = Math.max(1, Math.ceil(pct / 10));
       const x = p.x + 14, y = p.y + 12 - air;

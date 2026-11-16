@@ -67,17 +67,44 @@ const SHIPS = {
     greebles(c, -118, -68, 98, 68, 170, 23);
     c.fillStyle = color; c.fillRect(-60, -6, 40, 12);
   },
-  // Eiförmiges Landeschiff (dunkel, glatt, kaum Details)
+  // Landeschiff der Legion: langgestreckte, glatte, helle Kapsel (wie aufgereiht in der Wüste stehende Rieseneier)
   egg(c, color) {
-    const g = c.createRadialGradient(-30, -24, 8, 0, 0, 110);
-    g.addColorStop(0, '#5a5650'); g.addColorStop(0.55, '#2c2a27'); g.addColorStop(1, '#0e0d0c');
-    c.fillStyle = g; c.beginPath(); c.ellipse(0, 0, 100, 66, 0, 0, 6.28); c.fill();
-    c.strokeStyle = 'rgba(0,0,0,0.45)'; c.lineWidth = 1;
-    for (const k of [0.55, 0.8]) { c.beginPath(); c.ellipse(0, 0, 100 * k, 66 * k, 0, 0, 6.28); c.stroke(); }
-    c.beginPath(); c.moveTo(-100, 0); c.lineTo(100, 0); c.stroke();
-    c.strokeStyle = 'rgba(255,240,220,0.12)'; c.lineWidth = 2; c.beginPath(); c.ellipse(-4, -4, 94, 60, 0, 3.4, 5.2); c.stroke();
-    for (let i = 0; i < 12; i++) { const a = i / 12 * 6.28; c.fillStyle = 'rgba(255,150,90,0.55)'; c.beginPath(); c.arc(Math.cos(a) * 90, Math.sin(a) * 58, 1.6, 0, 6.28); c.fill(); }
-    c.fillStyle = color; c.beginPath(); c.ellipse(0, 0, 10, 6, 0, 0, 6.28); c.fill();
+    const A = 138, B = 46, N = 2.6;
+    const shape = (ins = 0) => {
+      c.beginPath();
+      for (let i = 0; i <= 96; i++) {
+        const t = i / 96 * Math.PI * 2, ct = Math.cos(t), st = Math.sin(t);
+        const x = Math.sign(ct) * Math.pow(Math.abs(ct), 2 / N) * (A - ins);
+        const fat = 1 + 0.1 * (-x / A); // Heck etwas dicker
+        const y = Math.sign(st) * Math.pow(Math.abs(st), 2 / N) * (B - ins) * fat;
+        i ? c.lineTo(x, y) : c.moveTo(x, y);
+      }
+      c.closePath();
+    };
+    // Grundkörper: quer gewölbt — oben hell, unten dunkel
+    let g = c.createLinearGradient(0, -B * 1.1, 0, B * 1.1);
+    g.addColorStop(0, '#e2dccf'); g.addColorStop(0.3, '#c6bfb0'); g.addColorStop(0.62, '#8e877a'); g.addColorStop(1, '#3e3a34');
+    c.fillStyle = g; shape(); c.fill();
+    c.save(); shape(); c.clip();
+    // Enden dunkeln ab (Rundung zur Spitze hin)
+    g = c.createLinearGradient(-A, 0, A, 0);
+    g.addColorStop(0, 'rgba(30,26,22,0.55)'); g.addColorStop(0.16, 'rgba(30,26,22,0)'); g.addColorStop(0.84, 'rgba(30,26,22,0)'); g.addColorStop(1, 'rgba(30,26,22,0.5)');
+    c.fillStyle = g; c.fillRect(-A, -B * 1.2, A * 2, B * 2.4);
+    // Langgezogenes Glanzlicht
+    c.save(); c.translate(-10, -B * 0.42); c.scale(1, 0.18);
+    g = c.createRadialGradient(0, 0, 0, 0, 0, A * 0.85); g.addColorStop(0, 'rgba(255,252,240,0.55)'); g.addColorStop(1, 'rgba(255,252,240,0)');
+    c.fillStyle = g; c.beginPath(); c.arc(0, 0, A * 0.85, 0, 6.28); c.fill(); c.restore();
+    // Feine Längsnähte und wenige Ringfugen — kaum Details, monolithisch
+    c.strokeStyle = 'rgba(40,36,30,0.35)'; c.lineWidth = 0.7;
+    for (const k of [-0.55, -0.2, 0.18]) { c.beginPath(); c.moveTo(-A * 0.9, B * k * 1.05); c.quadraticCurveTo(0, B * k * 1.15, A * 0.9, B * k * 0.95); c.stroke(); }
+    for (const x of [-A * 0.62, -A * 0.1, A * 0.42]) { c.beginPath(); c.moveTo(x, -B * 1.1); c.quadraticCurveTo(x + 6, 0, x, B * 1.1); c.stroke(); }
+    c.strokeStyle = 'rgba(255,250,235,0.18)'; c.lineWidth = 0.6;
+    for (const x of [-A * 0.62 + 1.2, -A * 0.1 + 1.2, A * 0.42 + 1.2]) { c.beginPath(); c.moveTo(x, -B * 1.1); c.quadraticCurveTo(x + 6, -B * 0.3, x + 2, -B * 0.2); c.stroke(); }
+    // Bugluke (Rampe) und Hoheitszeichen
+    c.fillStyle = 'rgba(30,26,22,0.6)'; c.beginPath(); c.ellipse(A * 0.86, 0, 9, B * 0.5, 0, 0, 6.28); c.fill();
+    c.fillStyle = color; c.globalAlpha = 0.8; c.fillRect(-A * 0.38, -3, 34, 6); c.globalAlpha = 1;
+    c.restore();
+    c.strokeStyle = 'rgba(30,26,22,0.7)'; c.lineWidth = 1; shape(); c.stroke();
   },
 };
 const ENGINES = {
@@ -91,20 +118,22 @@ export function shipKind(faction) { return faction === 'vareth' ? 'flotte' : fac
 
 // Gilden-Großtransporter: gewaltiger Ring hoch über der Karte, wirft einen Ringschatten
 export function drawGuildRing(ctx, s, t) {
-  const Ro = s.r, Ri = s.r * 0.72;
+  const Ro = s.r, Ri = s.r * 0.72, F = 0.62;
+  const annulus = (x, y, ro, ri, rot, fy = F) => { ctx.beginPath(); ctx.ellipse(x, y, ro, ro * fy, rot, 0, 6.28); ctx.moveTo(x + Math.cos(rot) * ri, y + Math.sin(rot) * ri); ctx.ellipse(x, y, ri, ri * fy, rot, 0, 6.28); };
   ctx.save(); ctx.globalAlpha = s.alpha ?? 1;
-  // Schatten am Boden
-  ctx.fillStyle = 'rgba(10,6,4,0.32)'; ctx.beginPath(); ctx.ellipse(s.x + s.z * 0.4, s.y + s.z * 0.55, Ro, Ro * 0.62, s.rot, 0, 6.28); ctx.ellipse(s.x + s.z * 0.4, s.y + s.z * 0.55, Ri, Ri * 0.62, s.rot, 6.28, 0, true); ctx.fill();
+  // Schatten am Boden: gleiche Form wie der Ring, Loch frei, mäßig versetzt
+  const so = Math.min(s.z, 160);
+  ctx.fillStyle = 'rgba(10,6,4,0.3)'; annulus(s.x + so * 0.35, s.y + so * 0.45, Ro, Ri, s.rot); ctx.fill('evenodd');
   // Ringkörper
   ctx.translate(s.x, s.y - s.z); ctx.rotate(s.rot);
   const g = ctx.createLinearGradient(-Ro, -Ro, Ro, Ro);
   g.addColorStop(0, '#8a7c6a'); g.addColorStop(0.5, '#4a4239'); g.addColorStop(1, '#1c1814');
-  ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(0, 0, Ro, Ro * 0.62, 0, 0, 6.28); ctx.ellipse(0, 0, Ri, Ri * 0.62, 0, 6.28, 0, true); ctx.fill();
+  ctx.fillStyle = g; annulus(0, 0, Ro, Ri, 0); ctx.fill('evenodd');
   // Innenwand (Tiefe) und Rand-Licht
-  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(0, 0, Ri, Ri * 0.62, 0, 0, 6.28); ctx.ellipse(0, Ro * 0.06, Ri * 0.98, Ri * 0.6, 0, 6.28, 0, true); ctx.fill();
-  ctx.strokeStyle = 'rgba(255,225,185,0.35)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(0, 0, Ro, Ro * 0.62, 0, 3.3, 5.3); ctx.stroke();
+  ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(0, 0, Ri, Ri * F, 0, 0, 6.28); ctx.moveTo(Ri * 0.98, Ro * 0.06); ctx.ellipse(0, Ro * 0.06, Ri * 0.98, Ri * 0.6, 0, 0, 6.28); ctx.fill('evenodd');
+  ctx.strokeStyle = 'rgba(255,225,185,0.35)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.ellipse(0, 0, Ro, Ro * F, 0, 3.3, 5.3); ctx.stroke();
   ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1.5;
-  for (let i = 0; i < 48; i++) { const a = i / 48 * 6.28; ctx.beginPath(); ctx.moveTo(Math.cos(a) * Ri, Math.sin(a) * Ri * 0.62); ctx.lineTo(Math.cos(a) * Ro, Math.sin(a) * Ro * 0.62); ctx.stroke(); }
+  for (let i = 0; i < 48; i++) { const a = i / 48 * 6.28; ctx.beginPath(); ctx.moveTo(Math.cos(a) * Ri, Math.sin(a) * Ri * F); ctx.lineTo(Math.cos(a) * Ro, Math.sin(a) * Ro * F); ctx.stroke(); }
   ctx.restore();
 }
 
@@ -112,16 +141,25 @@ export function drawMothership(ctx, s, t) {
   if (s.kind === 'ring') return drawGuildRing(ctx, s, t);
   const p = part(`ship-${s.kind}-${s.color}`, 290, 150, (L) => L((c) => SHIPS[s.kind](c, s.color), { bevel: 1.2, grime: 0.5 }), 2.5);
   const z = s.z, sc = s.scale || 1;
-  // Schatten: groß, weich, je höher desto weiter versetzt
-  ctx.save(); ctx.translate(s.x + z * 0.45, s.y + z * 0.6); ctx.rotate(s.rot); ctx.scale(sc, sc);
-  ctx.globalAlpha = 0.38 * (s.alpha ?? 1); ctx.drawImage(p.sh, -p.w / 2, -p.h / 2, p.w, p.h); ctx.restore();
+  // Schatten: gleiche Größe wie der Rumpf, Versatz begrenzt (Sonne steht hoch), je höher desto blasser
+  const so = Math.min(z, 150), sa = Math.max(0.12, 0.42 - Math.max(0, z - 80) * 0.0004);
+  ctx.save(); ctx.translate(s.x + so * 0.35, s.y + so * 0.45); ctx.rotate(s.rot); ctx.scale(sc, sc);
+  ctx.globalAlpha = sa * (s.alpha ?? 1); ctx.drawImage(p.sh, -p.w / 2, -p.h / 2, p.w, p.h); ctx.restore();
+  // Bodenleuchten unter schwebenden Eiern: aufgewirbelter, angestrahlter Staub
+  if (s.kind === 'egg' && s.glow > 0) {
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    const R0 = 120 * sc, gg = ctx.createRadialGradient(s.x, s.y + 10, 0, s.x, s.y + 10, R0);
+    gg.addColorStop(0, `rgba(255,190,130,${0.28 * s.glow})`); gg.addColorStop(0.5, `rgba(255,150,90,${0.12 * s.glow})`); gg.addColorStop(1, 'rgba(255,120,60,0)');
+    ctx.fillStyle = gg; ctx.beginPath(); ctx.ellipse(s.x, s.y + 10, R0, R0 * 0.7, 0, 0, 6.28); ctx.fill(); ctx.restore();
+  }
   // Landestrahlen zu den abgesetzten Einheiten
   if (s.beams) for (const b of s.beams) {
     if (b.a <= 0) continue;
     ctx.save(); ctx.globalCompositeOperation = 'lighter';
-    const g = ctx.createLinearGradient(s.x, s.y - z, b.x, b.y);
+    const ox = s.x + (s.beamFront ? Math.cos(s.rot) * 125 * sc : 0), oy = s.y - z + (s.beamFront ? Math.sin(s.rot) * 125 * sc : (s.beamY || 0));
+    const g = ctx.createLinearGradient(ox, oy, b.x, b.y);
     g.addColorStop(0, `rgba(255,220,160,${0.45 * b.a})`); g.addColorStop(1, `rgba(255,200,130,${0.15 * b.a})`);
-    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(s.x - 6, s.y - z); ctx.lineTo(b.x - 14, b.y); ctx.lineTo(b.x + 14, b.y); ctx.lineTo(s.x + 6, s.y - z); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = g; ctx.beginPath(); ctx.moveTo(ox - 10, oy); ctx.lineTo(b.x - 14, b.y); ctx.lineTo(b.x + 14, b.y); ctx.lineTo(ox + 10, oy); ctx.closePath(); ctx.fill();
     const gg = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, 22); gg.addColorStop(0, `rgba(255,230,180,${0.5 * b.a})`); gg.addColorStop(1, 'rgba(255,200,130,0)');
     ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(b.x, b.y, 22, 0, 6.28); ctx.fill();
     ctx.restore();
@@ -137,8 +175,14 @@ export function drawMothership(ctx, s, t) {
     g.addColorStop(0, 'rgba(255,245,220,0.95)'); g.addColorStop(0.35, 'rgba(255,170,90,0.6)'); g.addColorStop(1, 'rgba(255,100,40,0)');
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 26 * fl * (s.thrust ?? 1), 0, 6.28); ctx.fill();
   }
+  if (s.kind === 'egg' && s.hatch > 0) {
+    // Bugrampe öffnet sich: warmes Licht aus dem Inneren
+    const gh = ctx.createRadialGradient(120, 0, 0, 120, 0, 40);
+    gh.addColorStop(0, `rgba(255,225,175,${0.95 * s.hatch})`); gh.addColorStop(1, 'rgba(255,150,80,0)');
+    ctx.fillStyle = gh; ctx.beginPath(); ctx.ellipse(126, 0, 10 * s.hatch + 3, 16 * s.hatch, 0, 0, 6.28); ctx.fill();
+  }
   const blink = (t * 1.2) % 1 < 0.15;
-  if (blink) for (const [x, y, col] of [[100, -40, '255,60,50'], [100, 40, '80,255,120'], [-120, 0, '255,255,255']]) {
+  if (blink && s.kind !== 'egg') for (const [x, y, col] of [[100, -40, '255,60,50'], [100, 40, '80,255,120'], [-120, 0, '255,255,255']]) {
     const g = ctx.createRadialGradient(x, y, 0, x, y, 9); g.addColorStop(0, `rgba(${col},1)`); g.addColorStop(1, `rgba(${col},0)`);
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, 9, 0, 6.28); ctx.fill();
   }
