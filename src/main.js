@@ -86,7 +86,7 @@ async function start(save, mission) {
   $('#seedinfo').textContent = `Karte ${seed}`;
   let last = performance.now();
   const loop = (now) => {
-    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now;
     ctrl.update(dt);
     renderer.draw(dt);
     requestAnimationFrame(loop);

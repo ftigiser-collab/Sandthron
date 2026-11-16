@@ -1026,8 +1026,8 @@ export class Controller {
     el.classList.toggle('expanded', !!this.expanded);
     if (this.infoSel && el.querySelector('.cards')) this.showInfo(this.infoSel.kind, this.infoSel.type, e);
     const ic = el.querySelector('.p-icon');
-    if (ic) { const src = icon(e.isUnit ? 'unit' : 'bld', e.type, col); ic.width = 60; ic.height = 45; ic.getContext('2d').drawImage(src, 0, 0, 60, 45); }
-    el.querySelectorAll('canvas[data-icon]').forEach((c) => { const [k, t] = c.dataset.icon.split(':'); const src = icon(k, t, g.players[0].color); c.width = 72; c.height = 54; c.getContext('2d').drawImage(src, 0, 0, 72, 54); });
+    if (ic) { const src = icon(e.isUnit ? 'unit' : 'bld', e.type, col), d = Math.min(3, window.devicePixelRatio || 1); ic.width = 60 * d; ic.height = 45 * d; const ix = ic.getContext('2d'); ix.imageSmoothingQuality = 'high'; ix.drawImage(src, 0, 0, ic.width, ic.height); }
+    el.querySelectorAll('canvas[data-icon]').forEach((c) => { const [k, t] = c.dataset.icon.split(':'); const src = icon(k, t, g.players[0].color), d = Math.min(3, window.devicePixelRatio || 1); c.width = 96 * d; c.height = 72 * d; const ix = c.getContext('2d'); ix.imageSmoothingQuality = 'high'; ix.drawImage(src, 0, 0, c.width, c.height); });
     el.querySelectorAll('[data-a]').forEach((b) => b.onclick = (ev) => this.panelAction(b.dataset.a, b.dataset.t, e, ev));
   }
 

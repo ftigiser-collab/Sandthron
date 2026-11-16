@@ -3,6 +3,7 @@ import { shade, rgba } from './util.js';
 import { VDRAW } from './vart.js';
 import { IDRAW } from './iart.js';
 import { part, drawPart, drawPartShadow } from './art.js';
+import { UNITS } from './data.js';
 import { hasArt, drawBuildingArt, drawConstruction } from './bart.js';
 
 const M = { dark: '#3a3128', mid: '#6d604c', light: '#a4927a', hi: '#d3c4a6', sand: '#8a7354', glass: '#8fd0f0' };
@@ -693,7 +694,7 @@ export function drawWormSign(ctx, x, y, t, a = 1, scale = 1) {
   hi.addColorStop(0, `rgba(255,230,185,${0.5 * a})`); hi.addColorStop(1, 'rgba(255,230,185,0)');
   ctx.fillStyle = hi; ctx.beginPath(); ctx.ellipse(-3, -2, 17 * breathe, 11 * breathe, 0.4, 0, 6.28); ctx.fill();
   for (let k = 0; k < 4; k++) {
-    const ph = (t * 0.45 + k / 4) % 1, rx = 10 + ph * 34, ry = 7 + ph * 24, al = (1 - ph) * a;
+    const ph = (((t * 0.45 + k / 4) % 1) + 1) % 1, rx = 10 + ph * 34, ry = 7 + ph * 24, al = (1 - ph) * a;
     ctx.lineWidth = 1.6 * (1 - ph) + 0.6;
     ctx.strokeStyle = `rgba(255,232,190,${0.32 * al})`; ctx.beginPath(); ctx.ellipse(-0.8, -0.8, rx, ry, 0.4, 2.6, 5.8); ctx.stroke();
     ctx.strokeStyle = `rgba(90,55,25,${0.38 * al})`; ctx.beginPath(); ctx.ellipse(0.8, 0.8, rx, ry, 0.4, -0.6, 2.6); ctx.stroke();
@@ -832,23 +833,50 @@ export function drawWormMaw(ctx, x, y, t, k, scale = 1) {
 
 // ---------- Kachel-Icons für das Menü ----------
 const iconCache = new Map();
+const iconBg = {};
+function iconBackdrop(sky) {
+  if (iconBg[sky]) return iconBg[sky];
+  const W = 240, H = 180, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const c = cv.getContext('2d');
+  const g = c.createLinearGradient(0, 0, W * 0.3, H);
+  if (sky) { g.addColorStop(0, '#e6c7a0'); g.addColorStop(1, '#b48456'); } else { g.addColorStop(0, '#d9ad74'); g.addColorStop(1, '#9a6a3c'); }
+  c.fillStyle = g; c.fillRect(0, 0, W, H);
+  // Sandrippel
+  for (let k = 0; k < 70; k++) {
+    const x = Math.random() * W, y = Math.random() * H, len = 14 + Math.random() * 30;
+    c.strokeStyle = 'rgba(255,236,200,0.22)'; c.lineWidth = 1.2; c.beginPath(); c.moveTo(x, y); c.quadraticCurveTo(x + len / 2, y - 3, x + len, y + 2); c.stroke();
+    c.strokeStyle = 'rgba(110,70,35,0.16)'; c.beginPath(); c.moveTo(x + 1, y + 2.5); c.quadraticCurveTo(x + len / 2 + 1, y - 0.5, x + len + 1, y + 4.5); c.stroke();
+  }
+  for (let k = 0; k < 400; k++) { c.fillStyle = Math.random() < 0.5 ? 'rgba(90,55,25,0.18)' : 'rgba(255,240,210,0.2)'; c.fillRect(Math.random() * W, Math.random() * H, 1.2, 1.2); }
+  if (sky) { const h = c.createLinearGradient(0, 0, 0, H); h.addColorStop(0, 'rgba(255,240,220,0.35)'); h.addColorStop(1, 'rgba(255,240,220,0)'); c.fillStyle = h; c.fillRect(0, 0, W, H); }
+  // Licht oben links, Vignette
+  const l = c.createRadialGradient(W * 0.3, H * 0.25, 10, W * 0.5, H * 0.5, W * 0.75);
+  l.addColorStop(0, 'rgba(255,235,200,0.25)'); l.addColorStop(0.6, 'rgba(0,0,0,0)'); l.addColorStop(1, 'rgba(30,15,5,0.55)');
+  c.fillStyle = l; c.fillRect(0, 0, W, H);
+  return (iconBg[sky] = cv);
+}
 export function icon(kind, type, color) {
   const key = kind + type + color;
   if (iconCache.has(key)) return iconCache.get(key);
-  const cv = document.createElement('canvas'); cv.width = 120; cv.height = 90;
+  const W = 240, H = 180, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
   const ctx = cv.getContext('2d');
-  const g = ctx.createLinearGradient(0, 0, 0, 90); g.addColorStop(0, '#d8b07a'); g.addColorStop(1, '#a87a48');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, 120, 90);
-  ctx.save(); ctx.translate(60, 50); ctx.scale(1.55, 1.55);
+  const def = kind === 'unit' ? (UNITS[type] || {}) : {};
+  const air = def.mt === 'air';
+  ctx.drawImage(iconBackdrop(air), 0, 0);
+  ctx.save();
   if (kind === 'unit') {
-    const fake = { type, def: { capacity: 1, mt: '' }, facing: -0.5, id: 3, cargo: 0.6, ammo: 3 };
-    drawUnit(ctx, fake, 0, type === 'libelle' || type === 'falke' || type === 'traeger' ? 8 : 0, color, 0.3, { z: 10, turret: 0 });
+    const cat = def.cat;
+    const sc = cat === 'inf' ? 3.6 : air ? 2.25 : type === 'koloss' ? 1.85 : (type === 'panzer' || type === 'laserpanzer' || type === 'ernter' || type === 'werfer' || type === 'brenner') ? 2.3 : 2.6;
+    ctx.translate(W / 2, H * 0.55 + (air ? 6 : 0)); ctx.scale(sc, sc);
+    const fake = { type, def: { ...def }, facing: -0.55, id: 3, cargo: 0.6, ammo: 3, hp: 100 };
+    drawUnit(ctx, fake, 0, 0, color, 0.3, { z: air ? 12 : 0, turret: 0.15 });
   } else {
-    drawBuilding(ctx, { type, turnsLeft: 0, def: {}, facing: -0.6, rise: 1 }, 0, 0, color, 0.7, {});
+    ctx.translate(W / 2, H * 0.53); ctx.scale(2.05, 2.05);
+    drawBuilding(ctx, { type, turnsLeft: 0, def: {}, facing: -0.6, rise: 1, id: 1, c: 0, r: 0 }, 0, 0, color, 0.7, {});
   }
   ctx.restore();
-  const v = ctx.createRadialGradient(60, 45, 30, 60, 45, 75); v.addColorStop(0, 'rgba(0,0,0,0)'); v.addColorStop(1, 'rgba(0,0,0,0.35)');
-  ctx.fillStyle = v; ctx.fillRect(0, 0, 120, 90);
+  // Rahmenlicht
+  ctx.strokeStyle = 'rgba(255,230,190,0.25)'; ctx.lineWidth = 2; ctx.strokeRect(1, 1, W - 2, H - 2);
   iconCache.set(key, cv);
   return cv;
 }

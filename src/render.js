@@ -200,6 +200,17 @@ export class Renderer {
       else drawBuilding(ctx, b, p.x, p.y, col, this.t, bo);
       if (b.turnsLeft > 0 && Math.random() < 0.08) { const sx = p.x + (Math.random() - 0.5) * 30, sy = p.y + (Math.random() - 0.5) * 30; this.fx.spark(sx, sy, 3, '255,230,150', 50); this.fx.flash(sx, sy, 8, '200,230,255', 0.06); }
       const hpk = b.hp / b.maxHp;
+      if (hpk < 0.7 && !b.turnsLeft) {
+        // Rußflecken und Einschläge, je nach Schaden
+        const n = Math.ceil((0.7 - hpk) * 10);
+        for (let k = 0; k < n; k++) {
+          const sx = p.x + Math.sin(b.id * 7.1 + k * 3.3) * 22, sy = p.y + Math.cos(b.id * 3.7 + k * 5.1) * 18, rr = 6 + (k % 3) * 3;
+          const gs = ctx.createRadialGradient(sx, sy, 0, sx, sy, rr); gs.addColorStop(0, 'rgba(20,12,8,0.6)'); gs.addColorStop(1, 'rgba(20,12,8,0)');
+          ctx.fillStyle = gs; ctx.beginPath(); ctx.arc(sx, sy, rr, 0, 6.28); ctx.fill();
+          ctx.fillStyle = 'rgba(10,6,4,0.7)'; ctx.beginPath(); ctx.arc(sx, sy, 1.6, 0, 6.28); ctx.fill();
+          if (hpk < 0.35 && k % 2 === 0) { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(255,120,40,${0.35 + 0.25 * Math.sin(this.t * 7 + k)})`; ctx.beginPath(); ctx.arc(sx, sy, 2.4, 0, 6.28); ctx.fill(); ctx.globalCompositeOperation = 'source-over'; }
+        }
+      }
       if (hpk < 0.6 && Math.random() < 0.05) this.fx.smoke(p.x + (Math.random() - 0.5) * 30, p.y + (Math.random() - 0.5) * 24, 1, 5, 0.8);
       if (hpk < 0.3 && Math.random() < 0.08) this.fx.fire(p.x + (Math.random() - 0.5) * 26, p.y + (Math.random() - 0.5) * 20, 1, 4);
       if (b.producing) { ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.arc(p.x + 22, p.y - 22, 8, 0, 6.28); ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x + 22, p.y - 22, 6, this.t * 4, this.t * 4 + 4); ctx.stroke(); }
@@ -288,6 +299,7 @@ export class Renderer {
       this.fx.add({ kind: 'puff', x: bx, y: by, vx: -Math.cos(u.facing) * 6, vy: -8, life: 1.1, size: 2.5, grow: 7, col: '70,66,62', a: 0.35, air: true });
     }
     if (u.harvestAnim > 0) u.harvestAnim = Math.max(0, u.harvestAnim - 0.004);
+    if (u.def.cat === 'veh' && u.hp < 50 && !u.sink && Math.random() < (u.hp < 25 ? 0.12 : 0.05)) { this.fx.smoke(p.x - 4, p.y - 4, 1, 4, 0.85); if (u.hp < 25) this.fx.fire(p.x + (Math.random() - 0.5) * 8, p.y - 2, 1, 3); }
     if (u.def.harvester && !u.anim && g.spiceAt(u.c, u.r) > 0 && Math.random() < 0.35) {
       const fx = p.x + Math.cos(u.facing) * 24, fy = p.y + Math.sin(u.facing) * 24;
       this.fx.add({ kind: 'puff', x: fx + (Math.random() - 0.5) * 14, y: fy, vx: 8 + Math.random() * 10, vy: -14 - Math.random() * 10, life: 2.2, size: 4, grow: 12, col: Math.random() < 0.5 ? '205,120,60' : '190,150,100', a: 0.3, air: true });

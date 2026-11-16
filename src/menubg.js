@@ -86,7 +86,7 @@ export function startMenuBg(host) {
 
   function frame(now) {
     if (!running) return;
-    const dt = Math.min(0.05, (now - last) / 1000); last = now; t += dt;
+    const dt = Math.max(0, Math.min(0.05, (now - last) / 1000)); last = now; t += dt;
     if (!static_) { static_ = document.createElement('canvas'); static_.width = cv.width; static_.height = cv.height; const sc = static_.getContext('2d'); sc.scale(dpr, dpr); drawSky(sc); }
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(static_, 0, 0);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
