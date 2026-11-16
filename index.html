@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#1a120c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Sandthron</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="game"></canvas>
+  <div id="vignette"></div>
+
+  <header id="topbar">
+    <div class="brand">SANDTHRON</div>
+    <div class="stat"><span class="lbl">Runde</span><b id="round">1</b></div>
+    <div class="stat"><span class="lbl">Credits</span><b id="credits">0</b></div>
+    <div class="stat pw"><span class="lbl">Energie</span><b id="power">0</b></div>
+    <div class="spacer"></div>
+    <button id="helpbtn" title="Hilfe">?</button>
+    <button id="nextunit">Nächste Einheit</button>
+    <button id="endturn" class="primary">Runde beenden</button>
+  </header>
+
+  <canvas id="minimap" width="220" height="140"></canvas>
+  <div id="zoom"><button id="zoomin">+</button><button id="zoomout">−</button></div>
+  <div id="seedinfo"></div>
+  <div id="log"></div>
+  <aside id="panel"></aside>
+
+  <div id="forecast">
+    <div class="fc-title">Angriff</div>
+    <div class="fc-row"><span>Schaden</span><b class="fc-dmg">0 %</b></div>
+    <div class="fc-row"><span>Gegenschlag</span><b class="fc-ctr">0 %</b></div>
+    <div class="fc-btns"><button id="fc-no">Abbrechen</button><button id="fc-ok" class="primary">Angreifen</button></div>
+  </div>
+
+  <div id="banner"></div>
+
+  <div id="help">
+    <div class="box">
+      <button class="close">×</button>
+      <h2>So wird gespielt</h2>
+      <h3>Steuerung</h3>
+      <ul>
+        <li><b>Antippen / Linksklick:</b> Einheit wählen, dann blaues Feld antippen zum Ziehen.</li>
+        <li><b>Rot markierte Gegner</b> antippen zeigt die Schadensvorschau, nochmal antippen greift an.</li>
+        <li><b>Ziehen</b> verschiebt die Karte, <b>Zwei Finger / Mausrad</b> zoomt.</li>
+        <li><b>Gebäude antippen:</b> Bauhof baut, Kaserne, Fahrzeugwerk und Horst produzieren.</li>
+        <li>Tastatur: <b>E</b> Runde beenden, <b>N</b> nächste Einheit, <b>Esc</b> abbrechen, <b>WASD</b> Karte.</li>
+      </ul>
+      <h3>Regeln</h3>
+      <ul>
+        <li><b>Glut</b> ist die Ressource. Ernter sammeln sie auf orangen Feldern und laden neben einer Raffinerie ab.</li>
+        <li><b>Würmer</b> leben im Sand und jagen Erschütterungen. Erntende Ernter locken am stärksten. Auf Fels und im Gebirge seid ihr sicher.</li>
+        <li><b>Der Sturm</b> zieht jede Runde weiter. Die gestrichelte Fläche zeigt, wohin er als Nächstes zieht. Im Sturm gibt es Schaden, Felder darin sind unpassierbar.</li>
+        <li><b>Glutausbrüche</b> lassen alle vier Runden neue Felder entstehen, manchmal mit einem neuen Wurm.</li>
+        <li><b>Energie:</b> Ist der Verbrauch höher als die Erzeugung, stehen Produktion und Abwehrstellungen still. Windfallen bauen.</li>
+        <li><b>Thopter</b> fliegen über alles. Kampf-Thopter laden ihre Raketen am Horst nach, Träger-Thopter heben Bodeneinheiten an.</li>
+        <li><b>Gegenschlag:</b> Wer angreift, wird zurückbeschossen, wenn der Gegner in Reichweite ist. Raketenwerfer feuern aus der Ferne ohne Gegenschlag.</li>
+        <li><b>Deckung:</b> Dünen 10 %, Fels 15 %, Gebirge 35 % weniger Schaden.</li>
+        <li><b>Sieg:</b> Alle gegnerischen Gebäude zerstören.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div id="endscreen">
+    <h1>Ende</h1>
+    <div class="stats"></div>
+    <button class="primary" onclick="location.reload()">Neues Spiel</button>
+  </div>
+
+  <div id="menu">
+    <div class="m-box">
+      <div class="m-title">SANDTHRON</div>
+      <div class="m-sub">Rundenstrategie auf einem Wüstenplaneten</div>
+      <p class="m-text">Haus Vareth gegen Haus Kordan. Erntet Glut, baut eure Basis, beherrscht den Himmel mit Ornithoptern und hütet euch vor dem, was unter dem Sand lauert.</p>
+      <div class="m-label">Schwierigkeit</div>
+      <div class="m-diff">
+        <button data-diff="leicht">Leicht</button>
+        <button data-diff="normal" class="on">Normal</button>
+        <button data-diff="schwer">Schwer</button>
+      </div>
+      <div class="m-label">Karte (optional)</div>
+      <input id="seed" placeholder="Zufällig — oder Zahl/Wort eingeben" autocomplete="off">
+      <button id="start" class="primary big">Spiel starten</button>
+      <div class="loading">Die Wüste entsteht …</div>
+      <div class="m-ver">Stufe 1 · Prototyp</div>
+    </div>
+  </div>
+</div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
