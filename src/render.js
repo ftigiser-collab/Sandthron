@@ -15,6 +15,8 @@ export class Renderer {
     this.t = 0;
     this.fogDirty = true;
     this.spiceSprites = this.makeSpiceSprites();
+    this.wrecks = []; this.rubble = []; this.bolts = [];
+    this.light = [255, 255, 255]; this.nightK = 0;
     this.stormParticles = Array.from({ length: 160 }, () => ({ a: Math.random() * 6.28, d: Math.random(), s: 0.5 + Math.random(), y: Math.random() }));
     this.resize();
   }
@@ -115,12 +117,20 @@ export class Renderer {
     this.drawHighlights(ctx);
     this.fx.drawDecals(ctx);
 
+    this.drawWrecks(ctx, dt);
     // Gebäude
     const bs = g.buildings.filter((b) => !b.gone && g.seen(b)).sort((a, b) => a.r - b.r);
     for (const b of bs) {
       const p = this.posOf(b);
       const col = g.players[b.owner].color;
+      ctx.save();
+      if (b.hitFlash > 0 && FILTER_OK) ctx.filter = `brightness(${1 + b.hitFlash * 1.6})`;
       drawBuilding(ctx, b, p.x, p.y, col, this.t, { unloading: b.unloading > 0, recoil: b.recoil || 0 });
+      ctx.restore();
+      if (b.turnsLeft > 0 && Math.random() < 0.08) { const sx = p.x + (Math.random() - 0.5) * 30, sy = p.y + (Math.random() - 0.5) * 30; this.fx.spark(sx, sy, 3, '255,230,150', 50); this.fx.flash(sx, sy, 8, '200,230,255', 0.06); }
+      const hpk = b.hp / b.maxHp;
+      if (hpk < 0.6 && Math.random() < 0.05) this.fx.smoke(p.x + (Math.random() - 0.5) * 30, p.y + (Math.random() - 0.5) * 24, 1, 5, 0.8);
+      if (hpk < 0.3 && Math.random() < 0.08) this.fx.fire(p.x + (Math.random() - 0.5) * 26, p.y + (Math.random() - 0.5) * 20, 1, 4);
       if (b.producing) { ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.beginPath(); ctx.arc(p.x + 22, p.y - 22, 8, 0, 6.28); ctx.fill(); ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(p.x + 22, p.y - 22, 6, this.t * 4, this.t * 4 + 4); ctx.stroke(); }
     }
 
@@ -143,6 +153,7 @@ export class Renderer {
     for (const u of air) this.drawUnitFull(ctx, u);
     this.drawProjectiles(ctx);
     this.fx.draw(ctx, 'add', view);
+    this.drawLighting(ctx, dt, bs, [...ground, ...air]);
 
     this.drawStorm(ctx);
     this.drawFog(ctx);
@@ -161,18 +172,125 @@ export class Renderer {
     const col = g.players[u.owner].color;
     const done = u.owner === g.current && g.current === 0 && (u.acted || (u.moved && !g.canFire(u) && !(u.def.carrier && !u.acted)));
     if (this.hl.sel === u) {
-      ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.ellipse(p.x, p.y + 4, 20 + Math.sin(this.t * 5), 13, 0, 0, 6.28); ctx.stroke();
+      ctx.save(); ctx.translate(center(u.c, u.r).x, center(u.c, u.r).y); ctx.rotate(this.t * 0.6);
+      ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 2; ctx.setLineDash([8, 6]);
+      ctx.beginPath(); hexPath(ctx, 0, 0, R - 5); ctx.stroke(); ctx.restore();
     }
     ctx.save();
-    if (done) { if (FILTER_OK) ctx.filter = 'saturate(0.25) brightness(0.8)'; else ctx.globalAlpha = 0.7; }
-    const o = { ring: true, moving: !!u.anim, turret: u.turretRel || 0, recoil: u.recoil || 0, harvesting: u.harvestAnim > 0, z: u.def.mt === 'air' ? (u.z ?? 26) : 0 };
+    const filt = [];
+    if (done) filt.push('saturate(0.25) brightness(0.8)');
+    if (u.hitFlash > 0) filt.push(`brightness(${1 + u.hitFlash * 1.8})`);
+    if (filt.length) { if (FILTER_OK) ctx.filter = filt.join(' '); else if (done) ctx.globalAlpha = 0.7; }
+    const turretUnit = u.type === 'panzer' || u.type === 'werfer';
+    const idleTurret = turretUnit && !(u.aimUntil > this.t) ? Math.sin(this.t * 0.45 + u.id * 1.7) * 0.4 : (u.turretRel || 0);
+    const air = u.def.mt === 'air';
+    const z = air ? (u.z ?? 26) + (u.crashing ? 0 : Math.sin(this.t * 2.2 + u.id) * 1.8) : 0;
+    const o = { ring: !u.crashing, moving: !!u.anim, turret: idleTurret, recoil: u.recoil || 0, harvesting: u.harvestAnim > 0, z };
     if (u.def.carrier && u.carrying) {
       const c = g.get(u.carrying);
       if (c) o.carry = () => drawUnit(ctx, c, 0, 0, col, this.t, { turret: 0 });
     }
     drawUnit(ctx, u, p.x, p.y, col, this.t, o);
     ctx.restore();
+    // Leerlauf: Abgase, Erntewalze
+    if (u.def.cat === 'veh' && Math.random() < (u.anim ? 0.25 : 0.03)) {
+      const bx = p.x - Math.cos(u.facing) * 16, by = p.y - Math.sin(u.facing) * 16;
+      this.fx.add({ kind: 'puff', x: bx, y: by, vx: -Math.cos(u.facing) * 6, vy: -8, life: 1.1, size: 2.5, grow: 7, col: '70,66,62', a: 0.35, air: true });
+    }
+    if (u.harvestAnim > 0) u.harvestAnim = Math.max(0, u.harvestAnim - 0.004);
+    if (u.stunned > 0) this.statusIcon(ctx, p.x, p.y - 26 - z, 'stun');
+    if (u.shield > 0) this.statusIcon(ctx, p.x, p.y - z, 'shield');
+  }
+
+  statusIcon(ctx, x, y, kind) {
+    const t = this.t;
+    if (kind === 'stun') {
+      ctx.strokeStyle = 'rgba(200,140,255,0.9)'; ctx.lineWidth = 2;
+      for (let k = 0; k < 3; k++) { const a = t * 3 + k * 2.09; ctx.beginPath(); ctx.arc(x + Math.cos(a) * 8, y + Math.sin(a) * 3, 2.2, 0, 6.28); ctx.stroke(); }
+    } else if (kind === 'shield') {
+      ctx.strokeStyle = `rgba(120,200,255,${0.45 + 0.25 * Math.sin(t * 4)})`; ctx.lineWidth = 2;
+      ctx.beginPath(); hexPath(ctx, x, y, R - 8); ctx.stroke();
+      ctx.fillStyle = 'rgba(120,200,255,0.08)'; ctx.fill();
+    }
+  }
+
+  addWreck(e, p) {
+    this.wrecks.push({ x: p.x, y: p.y, facing: e.facing, unit: { type: e.type, def: e.def, facing: e.facing, id: e.id, cargo: 0, ammo: 0 }, color: this.g.players[e.owner].color, t: 0, life: 45 });
+    if (this.wrecks.length > 25) this.wrecks.shift();
+  }
+  addRubble(p) {
+    const chunks = Array.from({ length: 26 }, () => ({ x: (Math.random() - 0.5) * 50, y: (Math.random() - 0.5) * 40, s: 2 + Math.random() * 5, a: Math.random() * 6, c: 60 + Math.random() * 60 }));
+    this.rubble.push({ x: p.x, y: p.y, chunks, t: 0 });
+    if (this.rubble.length > 20) this.rubble.shift();
+  }
+
+  drawWrecks(ctx, dt) {
+    for (const r of this.rubble) {
+      r.t += dt;
+      const gr = ctx.createRadialGradient(r.x, r.y, 4, r.x, r.y, 36); gr.addColorStop(0, 'rgba(20,14,10,0.6)'); gr.addColorStop(1, 'rgba(20,14,10,0)');
+      ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(r.x, r.y, 36, 0, 6.28); ctx.fill();
+      for (const c of r.chunks) { ctx.fillStyle = `rgb(${c.c},${c.c * 0.92},${c.c * 0.85})`; ctx.save(); ctx.translate(r.x + c.x, r.y + c.y); ctx.rotate(c.a); ctx.fillRect(-c.s / 2, -c.s / 2, c.s, c.s * 0.7); ctx.restore(); }
+      if (r.t < 14 && Math.random() < 0.12) this.fx.fire(r.x + (Math.random() - 0.5) * 30, r.y + (Math.random() - 0.5) * 24, 1, 4);
+      if (r.t < 30 && Math.random() < 0.08) this.fx.smoke(r.x + (Math.random() - 0.5) * 30, r.y, 1, 6, 0.9);
+    }
+    const keep = [];
+    for (const w of this.wrecks) {
+      w.t += dt; if (w.t > w.life) continue; keep.push(w);
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, (w.life - w.t) / 6);
+      if (FILTER_OK) ctx.filter = 'grayscale(1) brightness(0.32)';
+      drawUnit(ctx, w.unit, w.x, w.y, '#333333', 0, { z: 0, turret: 0.6 });
+      ctx.restore();
+      if (w.t < 20 && Math.random() < 0.1) this.fx.smoke(w.x, w.y, 1, 4, 0.95);
+      if (w.t < 6 && Math.random() < 0.15) this.fx.fire(w.x, w.y, 1, 3);
+    }
+    this.wrecks = keep;
+  }
+
+  lightTarget() {
+    const ph = this.g.dayPhase ? this.g.dayPhase() : 'tag';
+    return { morgen: [255, 214, 184], tag: [255, 255, 255], abend: [255, 168, 120], nacht: [92, 108, 170] }[ph];
+  }
+
+  drawLighting(ctx, dt, bs, units) {
+    const tgt = this.lightTarget();
+    for (let k = 0; k < 3; k++) this.light[k] += (tgt[k] - this.light[k]) * Math.min(1, dt * 1.2);
+    const L = this.light;
+    const night = Math.max(0, Math.min(1, (255 - (L[0] + L[1]) / 2) / 150));
+    this.nightK = night;
+    if (L[0] > 252 && L[1] > 252 && L[2] > 252) return;
+    const v = this.view;
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = `rgb(${L[0] | 0},${L[1] | 0},${L[2] | 0})`;
+    ctx.fillRect(v.x0, v.y0, v.x1 - v.x0, v.y1 - v.y0);
+    ctx.globalCompositeOperation = 'lighter';
+    if (night > 0.15) {
+      const a = night;
+      const glow = (x, y, r, col, al) => { const gr = ctx.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, `rgba(${col},${al})`); gr.addColorStop(1, `rgba(${col},0)`); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(x, y, r, 0, 6.28); ctx.fill(); };
+      for (const b of bs) {
+        const p = this.posOf(b);
+        glow(p.x, p.y, 46, '255,190,110', 0.28 * a);
+        for (let k = 0; k < 3; k++) glow(p.x - 12 + k * 12, p.y + 6, 6, '255,220,150', (0.5 + 0.3 * Math.sin(this.t * 3 + k + b.id)) * a);
+      }
+      for (const u of units) {
+        const p = this.posOf(u);
+        if (u.def.mt === 'air') {
+          const z = u.z ?? 26, blink = Math.floor(this.t * 2 + u.id) % 2;
+          glow(p.x - 9, p.y - z, 5, blink ? '255,60,60' : '60,255,120', 0.9 * a);
+          glow(p.x, p.y - z, 30, '200,220,255', 0.12 * a);
+        } else if (u.def.cat === 'veh') {
+          const hx = p.x + Math.cos(u.facing) * 30, hy = p.y + Math.sin(u.facing) * 30;
+          glow(hx, hy, 26, '255,240,200', 0.22 * a);
+        } else glow(p.x, p.y, 14, '255,200,140', 0.15 * a);
+      }
+      // Glut leuchtet nachts
+      for (let r = 0; r < this.g.H; r++) for (let c = 0; c < this.g.W; c++) {
+        if (this.g.spiceAt(c, r) <= 0 || !this.g.explored[this.g.i(c, r)]) continue;
+        const p = center(c, r); if (p.x < v.x0 || p.x > v.x1 || p.y < v.y0 || p.y > v.y1) continue;
+        glow(p.x, p.y, 34, '255,120,50', 0.14 * a);
+      }
+    }
+    ctx.globalCompositeOperation = 'source-over';
   }
 
   drawBadges(ctx, e) {
@@ -257,6 +375,23 @@ export class Renderer {
     const gr = ctx.createRadialGradient(cpos.x, cpos.y, radPx * 0.2, cpos.x, cpos.y, radPx);
     gr.addColorStop(0, 'rgba(140,88,45,0.72)'); gr.addColorStop(0.7, 'rgba(165,105,55,0.5)'); gr.addColorStop(1, 'rgba(170,110,60,0)');
     ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(cpos.x, cpos.y, radPx, 0, 6.28); ctx.fill();
+    if (Math.random() < 0.025) {
+      const a = Math.random() * 6.28, d = Math.random() * radPx * 0.7;
+      let x = cpos.x + Math.cos(a) * d, y = cpos.y + Math.sin(a) * d - 30;
+      const pts = [[x, y]];
+      for (let k = 0; k < 6; k++) { x += (Math.random() - 0.5) * 22; y += 8 + Math.random() * 10; pts.push([x, y]); }
+      this.bolts.push({ pts, t: 0 });
+      this.fx.flash(x, y, 60, '200,220,255', 0.15);
+    }
+    ctx.globalCompositeOperation = 'lighter';
+    this.bolts = this.bolts.filter((b) => (b.t += 0.016) < 0.18);
+    for (const b of this.bolts) {
+      for (const [w, al] of [[5, 0.25], [1.8, 0.95]]) {
+        ctx.strokeStyle = `rgba(200,225,255,${al * (1 - b.t / 0.18)})`; ctx.lineWidth = w;
+        ctx.beginPath(); ctx.moveTo(b.pts[0][0], b.pts[0][1]); for (const p of b.pts) ctx.lineTo(p[0], p[1]); ctx.stroke();
+      }
+    }
+    ctx.globalCompositeOperation = 'source-over';
     ctx.strokeStyle = 'rgba(230,190,140,0.35)'; ctx.lineWidth = 1.5;
     for (const q of this.stormParticles) {
       q.a += 0.02 * q.s * (1.4 - q.d);

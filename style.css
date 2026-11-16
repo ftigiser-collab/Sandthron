@@ -29,6 +29,7 @@ button.primary:hover { filter: brightness(1.08); }
 .stat b { font-size: 16px; font-variant-numeric: tabular-nums; }
 .stat.pw.low b { color: #ff6a50; animation: blink 1s infinite; }
 .spacer { flex: 1; }
+.stat.dt.night b { color: #a9b8ff; }
 #helpbtn { width: 34px; padding: 7px 0; }
 @keyframes blink { 50% { opacity: .4; } }
 .pulse { animation: pulse .7s; }
@@ -116,6 +117,7 @@ button.big { width: 100%; margin-top: 18px; padding: 12px; font-size: 16px; }
   #topbar { gap: 6px; padding: 6px 8px; flex-wrap: wrap; }
   .brand { display: none; }
   .stat { min-width: 44px; } .stat b { font-size: 14px; }
+  .stat.dt { display: none; }
   #nextunit { font-size: 12px; padding: 7px 8px; }
   #endturn { font-size: 13px; padding: 7px 10px; }
   #minimap { width: 132px; height: 84px; top: 108px; }

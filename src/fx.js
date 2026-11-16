@@ -2,7 +2,7 @@
 const R = Math.random;
 
 export class FX {
-  constructor() { this.p = []; this.decals = []; this.shake = 0; }
+  constructor() { this.p = []; this.decals = []; this.corpses = []; this.shake = 0; }
 
   add(o) {
     if (this.p.length > 3000) return;
@@ -61,6 +61,10 @@ export class FX {
     this.decal(x, y, 10 * size + 4);
     this.shake = Math.max(this.shake, 2 * size);
   }
+  corpse(x, y, a, color, n = 2) {
+    for (let k = 0; k < n; k++) this.corpses.push({ x: x + (Math.random() - 0.5) * 16, y: y + (Math.random() - 0.5) * 12, a: a + (Math.random() - 0.5) * 1.5, color, t: 0 });
+    if (this.corpses.length > 60) this.corpses.splice(0, this.corpses.length - 60);
+  }
   decal(x, y, r) {
     this.decals.push({ x, y, r, a: 0.55, rot: R() * 6 });
     if (this.decals.length > 160) this.decals.shift();
@@ -83,10 +87,23 @@ export class FX {
     }
     p.length = w;
     for (const d of this.decals) d.a = Math.max(0.15, d.a - dt * 0.004);
+    for (const c of this.corpses) c.t += dt;
+    if (this.corpses.length && this.corpses[0].t > 25) this.corpses = this.corpses.filter((c) => c.t < 25);
     this.shake = Math.max(0, this.shake - dt * 12);
   }
 
   drawDecals(ctx) {
+    for (const c of this.corpses) {
+      const a = Math.min(1, (25 - c.t) / 5) * 0.85;
+      ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(c.a); ctx.globalAlpha = a;
+      ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.beginPath(); ctx.ellipse(1, 1.5, 8, 4, 0, 0, 6.28); ctx.fill();
+      ctx.fillStyle = '#5e5242'; ctx.beginPath(); ctx.ellipse(0, 0, 6, 2.6, 0, 0, 6.28); ctx.fill();
+      ctx.fillStyle = '#7a6a55'; ctx.beginPath(); ctx.arc(6.5, 0, 2.2, 0, 6.28); ctx.fill();
+      ctx.fillStyle = c.color; ctx.fillRect(-2, -2.6, 2.5, 2);
+      ctx.strokeStyle = '#22252a'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(-3, 4); ctx.lineTo(5, 6); ctx.stroke();
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
     for (const d of this.decals) {
       const g = ctx.createRadialGradient(d.x, d.y, 0, d.x, d.y, d.r);
       g.addColorStop(0, `rgba(30,20,14,${d.a})`);

@@ -2,6 +2,7 @@
 import { UNITS, BUILDINGS, WEAPONS, TERRAIN, MOVE_COST } from './data.js';
 import { center, pixelToHex, distance, R } from './hex.js';
 import { icon } from './sprites.js';
+import { angDiff } from './util.js';
 import { aiTurn, autoHarvest } from './ai.js';
 
 const $ = (s) => document.querySelector(s);
@@ -50,6 +51,8 @@ export class Controller {
       u.vis = { x: a.x + (b.x - a.x) * l, y: a.y + (b.y - a.y) * l };
       u.facing = Math.atan2(b.y - a.y, b.x - a.x);
       if (u.def.mt !== 'air' && u.def.cat === 'veh' && sand(path[i + 1]) && Math.random() < 0.5) this.fx.dust(u.vis.x - Math.cos(u.facing) * 12, u.vis.y - Math.sin(u.facing) * 12, 1, '205,160,100', 6, 4);
+      if (u.def.mt === 'air' && sand(path[i + 1]) && Math.random() < 0.15) this.fx.dust(u.vis.x, u.vis.y, 1, '210,170,110', 14, 5);
+      if (u.def.cat === 'inf' && Math.random() < 0.08) this.fx.dust(u.vis.x, u.vis.y + 4, 1, '190,150,100', 8, 2);
       const c = u.carrying && this.g.get(u.carrying); if (c) c.vis = u.vis;
     });
     u.vis = null; u.anim = false;
@@ -100,30 +103,81 @@ export class Controller {
     const a = g.byId.get(ev.att), t = g.byId.get(ev.target);
     if (!a || !t) return;
     const visible = g.seen(a) || g.seen(t) || a.owner === 0 || t.owner === 0;
-    if (!visible) { this.finishKill(t, ev.killed); this.finishKill(a, ev.counterKilled); return; }
+    if (!visible) { if (ev.killed) t.gone = true; if (ev.counterKilled) a.gone = true; return; }
     const pt = this.r.posOf(t);
     this.ensureVisible(pt.x, pt.y);
     const pa = this.r.posOf(a);
-    a.facing = Math.atan2(pt.y - pa.y, pt.x - pa.x);
+    await this.aimAt(a, Math.atan2(pt.y - pa.y, pt.x - pa.x));
+    this.kick(a, ev.proj);
     await this.shotVisual(a, t, ev.proj);
+    this.hitFlash(t);
     this.r.float(pt.x, pt.y - (t.isUnit && t.def.mt === 'air' ? 26 : 0), `-${Math.round(ev.dmg)}`, '#ff8a6a', ev.dmg > 40);
-    if (ev.killed) { await this.wait(0.1); this.finishKill(t, true); await this.wait(0.35); }
+    if (ev.killed) { await this.wait(0.1); await this.finishKill(t, true); await this.wait(0.3); }
     else if (ev.counter > 0 || ev.counterKilled) {
-      await this.wait(0.15);
-      t.facing = Math.atan2(pa.y - pt.y, pa.x - pt.x);
+      await this.wait(0.12);
+      await this.aimAt(t, Math.atan2(pa.y - pt.y, pa.x - pt.x));
+      this.kick(t, ev.counterProj);
       await this.shotVisual(t, a, ev.counterProj);
+      this.hitFlash(a);
       this.r.float(pa.x, pa.y - (a.isUnit && a.def.mt === 'air' ? 26 : 0), `-${Math.round(ev.counter)}`, '#ffb36a');
-      if (ev.counterKilled) { await this.wait(0.1); this.finishKill(a, true); await this.wait(0.35); }
+      if (ev.counterKilled) { await this.wait(0.1); await this.finishKill(a, true); await this.wait(0.3); }
     }
     await this.wait(0.15);
   }
 
-  finishKill(e, killed) {
-    if (!killed || !e || e.gone) return;
-    const p = this.r.posOf(e);
-    const big = e.isBuilding ? 1.8 : e.def.cat === 'inf' ? 0.5 : 1.1;
-    this.fx.explosion(p.x, p.y - (e.isUnit && e.def.mt === 'air' ? 26 : 0), big);
-    if (e.isBuilding) for (let k = 0; k < 4; k++) setTimeout(() => this.fx.explosion(p.x + (Math.random() - 0.5) * 40, p.y + (Math.random() - 0.5) * 30, 0.9), 120 * k);
+  async aimAt(a, ang) {
+    const turret = a.isUnit && (a.type === 'panzer' || a.type === 'werfer');
+    if (turret) {
+      const from = a.turretRel || 0, to = angDiff(a.facing, ang), d = angDiff(from, to);
+      a.aimUntil = this.r.t + 4;
+      if (Math.abs(d) > 0.05) await this.tween(Math.min(0.35, Math.abs(d) * 0.15 + 0.05), (k) => { a.turretRel = from + d * k; });
+      a.turretRel = to; return;
+    }
+    if (a.isUnit && a.def.cat === 'inf') { a.facing = ang; return; }
+    const from = a.facing || 0, d = angDiff(from, ang);
+    if (Math.abs(d) > 0.05) await this.tween(Math.min(0.35, Math.abs(d) * 0.13 + 0.05), (k) => { a.facing = from + d * k; });
+    a.facing = ang;
+  }
+  kick(a, proj) {
+    if (proj === 'bullet' || proj === 'flak') return;
+    a.recoil = 1; this.tween(0.3, (k) => { a.recoil = 1 - k; });
+  }
+  hitFlash(t) { if (!t || t.dead) return; t.hitFlash = 1; this.tween(0.25, (k) => { t.hitFlash = 1 - k; }); }
+
+  async finishKill(e, killed) {
+    if (!killed || !e || e.gone || e.crashing) return;
+    const p = { ...this.r.posOf(e) };
+    const fx = this.fx, col = this.g.players[e.owner].color;
+    if (e.isBuilding) {
+      fx.explosion(p.x, p.y, 1.8); fx.shake = 9;
+      for (let k = 0; k < 5; k++) setTimeout(() => fx.explosion(p.x + (Math.random() - 0.5) * 44, p.y + (Math.random() - 0.5) * 34, 0.8 + Math.random() * 0.5), 110 * k);
+      fx.debris(p.x, p.y, 24, '90,85,80');
+      this.r.addRubble(p);
+      e.gone = true; return;
+    }
+    if (e.def.mt === 'air') {
+      // Absturz: trudeln, Rauchspur, Aufschlag
+      e.crashing = true;
+      const z0 = e.z ?? 26, f0 = e.facing, dx = (Math.random() - 0.5) * 50, dy = 20 + Math.random() * 20;
+      fx.explosion(p.x, p.y - z0, 0.6);
+      await this.tween(0.9, (k) => {
+        e.z = z0 * (1 - k * k); e.facing = f0 + k * 9;
+        e.vis = { x: p.x + dx * k, y: p.y + dy * k * 0.5 };
+        if (Math.random() < 0.8) { fx.smoke(e.vis.x, e.vis.y - e.z, 1, 4, 0.95); fx.fire(e.vis.x, e.vis.y - e.z, 1, 3); }
+      });
+      const q = { ...e.vis };
+      fx.explosion(q.x, q.y, 1.3); fx.shake = 6;
+      this.r.addWreck(e, q);
+      e.gone = true; return;
+    }
+    if (e.def.cat === 'inf') {
+      fx.dust(p.x, p.y, 6, '150,120,90', 14, 4); fx.spark(p.x, p.y, 4, '255,160,100', 50);
+      fx.corpse(p.x, p.y, e.facing + Math.PI / 2, col, e.type === 'rak' ? 2 : 3);
+      e.gone = true; return;
+    }
+    fx.explosion(p.x, p.y, 1.2);
+    fx.debris(p.x, p.y, 10, '60,58,55');
+    this.r.addWreck(e, p);
     e.gone = true;
   }
 
@@ -142,14 +196,31 @@ export class Controller {
         for (let k = 0; k < 10; k++) this.fx.add({ kind: 'glow', x: p.x + (Math.random() - 0.5) * 30, y: p.y + (Math.random() - 0.5) * 20, vy: -20, life: 0.8, size: 3, grow: 1, col: '255,150,60', a: 0.9 });
       } else if (ev.type === 'unload') {
         const u = g.get(ev.u); if (!u) continue;
+        const ref = g.byId.get(ev.ref);
+        if (ref && g.seen(u)) {
+          const a = this.r.posOf(u), b = center(ref.c, ref.r);
+          ref.unloading = 1;
+          await this.tween(0.7, (k, dt) => {
+            for (let n = 0; n < 3; n++) { const sx = a.x + (Math.random() - 0.5) * 12, sy = a.y + (Math.random() - 0.5) * 12; this.fx.add({ kind: 'glow', x: sx, y: sy, vx: (b.x - sx) * 1.6, vy: (b.y - sy) * 1.6 - 20, life: 0.6, size: 3, grow: -2, col: '255,150,60', a: 0.9 }); }
+          });
+          ref.unloading = 0;
+        }
         if (u.owner === 0) { const p = this.r.posOf(u); this.r.float(p.x, p.y - 10, `+${ev.amount} Credits`, '#8ef08a', true); this.pulse('#credits'); }
       } else if (ev.type === 'spawn') {
         const u = g.get(ev.u); if (!u || !g.seen(u)) continue;
-        const p = this.r.posOf(u); this.fx.ring(p.x, p.y, 8, '160,220,255', 0.5);
-        if (u.def.mt === 'air') { u.z = 0; this.tween(0.8, (k) => { u.z = 26 * k; }); }
+        const p = center(u.c, u.r); this.fx.ring(p.x, p.y, 8, '160,220,255', 0.5);
+        const src = ev.from && g.byId.get(ev.from);
+        if (src && g.seen(u)) {
+          const a = center(src.c, src.r);
+          u.facing = Math.atan2(p.y - a.y, p.x - a.x);
+          if (u.def.mt === 'air') { u.z = 0; this.tween(0.9, (k) => { u.z = 26 * k; u.vis = { x: a.x + (p.x - a.x) * k * k, y: a.y + (p.y - a.y) * k * k }; if (Math.random() < 0.4) this.fx.dust(u.vis.x, u.vis.y, 1, '200,180,150', 18, 6); }).then(() => { u.vis = null; }); }
+          else { u.anim = true; this.fx.dust(a.x, a.y + 10, 6, '160,140,120', 20, 6); this.tween(0.6, (k) => { const kk = 1 - (1 - k) * (1 - k); u.vis = { x: a.x + (p.x - a.x) * kk, y: a.y + (p.y - a.y) * kk }; }).then(() => { u.vis = null; u.anim = false; }); }
+        } else if (u.def.mt === 'air') { u.z = 0; this.tween(0.8, (k) => { u.z = 26 * k; }); }
       } else if (ev.type === 'built') {
         const b = g.get(ev.b); if (!b || !g.seen(b)) continue;
         const p = this.r.posOf(b); b.rise = 0; this.fx.dust(p.x, p.y, 14, '170,150,120', 40, 8); this.tween(0.6, (k) => { b.rise = k; });
+      } else if (ev.type === 'income') {
+        if (ev.owner === 0) { const b = g.buildings.find((x) => x.owner === 0 && x.type === 'bauhof'); if (b) { const p = center(b.c, b.r); this.r.float(p.x, p.y - 20, `+${ev.amount} Credits`, '#8ef08a'); } }
       } else if (ev.type === 'rearm') {
         const u = g.get(ev.u); if (u && u.owner === 0) { const p = this.r.posOf(u); this.r.float(p.x, p.y - 26, 'Aufmunitioniert', '#a0e0ff'); }
       } else if (ev.type === 'storm') await this.animStorm(ev);
@@ -172,7 +243,7 @@ export class Controller {
     for (const h of ev.hits) {
       const e = g.byId.get(h.id); if (!e || !(g.seen(e) || e.owner === 0)) continue;
       const p = this.r.posOf(e); this.r.float(p.x, p.y, `-${h.dmg}`, '#ffcf8a');
-      if (e.dead) this.finishKill(e, true);
+      if (e.dead) await this.finishKill(e, true);
     }
     if (ev.hits.length) await this.wait(0.6);
   }
@@ -423,7 +494,7 @@ export class Controller {
     await this.playEvents(g.beginTurn(0));
     g.updateVision(); this.r.fogDirty = true;
     this.refresh();
-    await this.banner(`Runde ${g.round}`, 'Euer Zug', 0.9);
+    await this.banner(`Runde ${g.round}`, g.isNight() ? 'Euer Zug · Nacht: Bodensicht −1' : 'Euer Zug', 0.9);
     this.busy = false;
     $('#endturn').disabled = false;
     this.refresh();
@@ -539,6 +610,7 @@ export class Controller {
   refresh() {
     const g = this.g, p = g.players[0];
     $('#round').textContent = g.round;
+    const ph = g.dayPhase(); const tz = $('#daytime'); if (tz) { tz.textContent = { morgen: 'Morgen', tag: 'Tag', abend: 'Abend', nacht: 'Nacht' }[ph]; tz.parentElement.classList.toggle('night', ph === 'nacht'); }
     $('#credits').textContent = Math.floor(p.credits).toLocaleString('de-DE');
     const pw = $('#power');
     pw.textContent = `${p.powerProd - p.powerUse >= 0 ? '+' : ''}${p.powerProd - p.powerUse}`;

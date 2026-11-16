@@ -345,12 +345,12 @@ export class Game {
         if (b.turnsLeft === 0) {
           this.say(`${b.def.name} fertig`, 'good', owner);
           ev.push({ type: 'built', b: b.id });
-          if (b.def.freeUnit) { const u = this.spawnNear(owner, b.def.freeUnit, b.c, b.r); if (u) ev.push({ type: 'spawn', u: u.id }); }
+          if (b.def.freeUnit) { const u = this.spawnNear(owner, b.def.freeUnit, b.c, b.r); if (u) ev.push({ type: 'spawn', u: u.id, from: b.id }); }
         }
       }
       if (b.producing && b.turnsLeft <= 0) {
         const u = this.spawnNear(owner, b.producing, b.c, b.r);
-        if (u) { ev.push({ type: 'spawn', u: u.id }); this.say(`${u.def.name} bereit`, 'good', owner); b.producing = null; }
+        if (u) { ev.push({ type: 'spawn', u: u.id, from: b.id }); this.say(`${u.def.name} bereit`, 'good', owner); b.producing = null; }
         else this.say(`${b.def.name}: kein Platz zum Ausrücken`, 'warn', owner);
       }
     }
@@ -565,11 +565,15 @@ export class Game {
 
   wormSeen(w) { return !!(this.visible[this.i(w.c, w.r)] || this.radar[this.i(w.c, w.r)]); }
 
+  // ---------- Tageszeit ----------
+  dayPhase(round = this.round) { return ['morgen', 'tag', 'tag', 'tag', 'abend', 'nacht', 'nacht', 'morgen'][(round - 1) % 8]; }
+  isNight() { return this.dayPhase() === 'nacht'; }
+
   // ---------- Sicht ----------
   updateVision() {
     this.visible.fill(0); this.radar.fill(0);
     const reveal = (c, r, rad, arr = this.visible) => { for (const [x, y] of ring(c, r, rad, this.W, this.H)) arr[this.i(x, y)] = 1; };
-    for (const u of this.units) if (!u.dead && u.owner === 0 && !u.carried) reveal(u.c, u.r, u.def.sight);
+    for (const u of this.units) if (!u.dead && u.owner === 0 && !u.carried) reveal(u.c, u.r, Math.max(1, u.def.sight - (this.isNight() && u.def.mt !== 'air' ? 1 : 0)));
     for (const b of this.buildings) if (!b.dead && b.owner === 0) {
       reveal(b.c, b.r, b.def.sight);
       if (b.def.radar && b.turnsLeft <= 0 && !this.players[0].low) reveal(b.c, b.r, 9, this.radar);
