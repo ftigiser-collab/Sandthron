@@ -104,8 +104,8 @@ export class Renderer {
     }
     for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
       const i = y * n + x, dx = h[y * n + ((x + 1) % n)] - h[y * n + ((x - 1 + n) % n)], dy = h[((y + 1) % n) * n + x] - h[((y - 1 + n) % n) * n + x];
-      const v = clamp(128 - (dx + dy) * 160, 0, 255);
-      img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v; img.data[i * 4 + 3] = 255;
+      const v = clamp(-(dx + dy) * 1.25, -1, 1);
+      img.data[i * 4] = img.data[i * 4 + 1] = v > 0 ? 255 : 30; img.data[i * 4 + 2] = v > 0 ? 235 : 10; img.data[i * 4 + 3] = Math.abs(v) * 110;
     }
     c.putImageData(img, 0, 0);
     const p = ctx.createPattern(cv, 'repeat');
@@ -164,12 +164,12 @@ export class Renderer {
 
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(g.map.base, 0, 0);
-    if (cam.z > 1.1) {
+    if (cam.z > 1.3) {
       // Mikrorelief: feine, scharfe Körnung beim Reinzoomen
       const mp = this.microPattern(ctx);
-      ctx.globalCompositeOperation = 'overlay'; ctx.globalAlpha = Math.min(0.5, (cam.z - 1.1) * 0.6);
+      ctx.globalAlpha = Math.min(0.7, (cam.z - 1.3) * 0.9);
       ctx.fillStyle = mp; ctx.fillRect(view.x0, view.y0, view.x1 - view.x0, view.y1 - view.y0);
-      ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1;
     }
     this.drawSandDrift(ctx);
     this.drawHeat(ctx);
@@ -655,16 +655,25 @@ export class Renderer {
     const gr = ctx.createRadialGradient(cpos.x, cpos.y, radPx * 0.2, cpos.x, cpos.y, radPx);
     gr.addColorStop(0, 'rgba(140,88,45,0.72)'); gr.addColorStop(0.7, 'rgba(165,105,55,0.5)'); gr.addColorStop(1, 'rgba(170,110,60,0)');
     ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(cpos.x, cpos.y, radPx, 0, 6.28); ctx.fill();
-    // Wolkenwände in Spiralarmen
-    if (!this.stormClouds) this.stormClouds = Array.from({ length: 46 }, (_, i) => ({ arm: i % 3, d: 0.15 + Math.random() * 0.9, a: Math.random() * 6.28, sz: 0.5 + Math.random() * 0.8, v: i % 6, col: ['214,168,112', '176,120,70', '140,92,54'][i % 3] }));
-    for (const q of this.stormClouds) {
-      q.a += 0.006 * (1.6 - q.d);
-      const ang = q.a + q.arm * 2.094 + q.d * 2.6, d = q.d * radPx, x = cpos.x + Math.cos(ang) * d, y = cpos.y + Math.sin(ang) * d * 0.85;
-      const r = (26 + 30 * q.sz) * (0.6 + q.d * 0.6);
-      ctx.globalAlpha = 0.62 * (1 - Math.max(0, q.d - 0.85) * 4);
-      ctx.save(); ctx.translate(x, y); ctx.rotate(ang * 1.5); ctx.drawImage(tintedBlob(q.col, q.v), -r, -r, r * 2, r * 2); ctx.restore();
+    // Wolkenwände in Spiralarmen: einmal vorgerendert, dann gedreht (zwei Lagen gegenläufig)
+    if (!this.stormSprite) {
+      const n = 512, cv = document.createElement('canvas'); cv.width = cv.height = n;
+      const c = cv.getContext('2d'), m = n / 2;
+      for (let i = 0; i < 120; i++) {
+        const arm = i % 3, d = 0.08 + Math.random() * 0.82, ang = arm * 2.094 + d * 2.8 + (Math.random() - 0.5) * 0.5;
+        const x = m + Math.cos(ang) * d * m, y = m + Math.sin(ang) * d * m, r = m * (0.16 + Math.random() * 0.16) * (0.7 + d * 0.5);
+        c.globalAlpha = 0.8 * (1 - Math.max(0, d - 0.75) * 3);
+        c.save(); c.translate(x, y); c.rotate(Math.random() * 6.28); c.drawImage(tintedBlob(['214,168,112', '176,120,70', '140,92,54'][i % 3], i), -r, -r, r * 2, r * 2); c.restore();
+      }
+      this.stormSprite = cv;
     }
-    ctx.globalAlpha = 1;
+    {
+      const sz = radPx * 2.3;
+      ctx.save(); ctx.translate(cpos.x, cpos.y); ctx.scale(1, 0.88);
+      ctx.save(); ctx.rotate(this.t * 0.25); ctx.globalAlpha = 0.85; ctx.drawImage(this.stormSprite, -sz / 2, -sz / 2, sz, sz); ctx.restore();
+      ctx.save(); ctx.rotate(-this.t * 0.12 + 1.3); ctx.globalAlpha = 0.45; ctx.drawImage(this.stormSprite, -sz * 0.4, -sz * 0.4, sz * 0.8, sz * 0.8); ctx.restore();
+      ctx.restore(); ctx.globalAlpha = 1;
+    }
     if (Math.random() < 0.025) {
       const a = Math.random() * 6.28, d = Math.random() * radPx * 0.7;
       let x = cpos.x + Math.cos(a) * d, y = cpos.y + Math.sin(a) * d - 30;
