@@ -1080,7 +1080,7 @@ export class Controller {
     const why = ok ? '' : missing || (p.credits < cost ? 'Zu wenig Credits' : isB ? 'Bauhof hat diese Runde schon gebaut' : b.producing ? 'Produziert bereits' : p.low ? 'Energie zu niedrig' : 'Nicht verfügbar');
     box.innerHTML = `<div class="pi-head"><b>${d.name}</b><span>◈ ${cost}${isB ? ` · ${d.turns} ${d.turns === 1 ? 'Runde' : 'Runden'}` : ' · nächste Runde'}</span></div>
       ${this.profileHtml(kind, type)}
-      <button class="primary wide" data-a="${isB ? 'build' : 'prod'}" data-t="${type}" ${ok ? '' : 'disabled'}>${isB ? 'Bauen' : 'Produzieren'}</button>${why ? `<div class="pi-why">${why}</div>` : ''}`;
+      ${isB ? (ok ? '<div class="pi-hint">▶ Grünes Feld auf der Karte antippen, um zu bauen</div>' : '') : `<button class="primary wide" data-a="prod" data-t="${type}" ${ok ? '' : 'disabled'}>Produzieren</button>`}${why ? `<div class="pi-why">${why}</div>` : ''}`;
     box.querySelectorAll('[data-a]').forEach((btn) => btn.onclick = () => this.panelAction(btn.dataset.a, btn.dataset.t, b));
     document.querySelectorAll('#panel .card').forEach((c) => c.classList.toggle('sel', c.dataset.t === `${kind}:${type}`));
   }
@@ -1158,25 +1158,36 @@ export class Controller {
     return `<div class="p-title">${title}</div><div class="cards">${cards}</div><div id="pinfo"><div class="pi-empty">Antippen für Details, Stärken und Schwächen</div></div>${cancel}`;
   }
 
+  startBuild(t, fromCard) {
+    const g = this.g, d = BUILDINGS[t];
+    if (!g.bauhofReady(0) || !g.prereqOk(0, d) || g.players[0].credits < d.cost) {
+      if (this.mode === 'build') { this.clearHL(); this.mode = 'idle'; }
+      if (!fromCard) this.flash(g.players[0].credits < d.cost ? 'Zu wenig Credits' : 'Noch nicht verfügbar');
+      return;
+    }
+    const sel = this.r.hl.sel;
+    this.clearHL(); this.r.hl.sel = sel; this.mode = 'build'; this.buildType = t;
+    this.r.hl.build = g.buildHexes(0, t);
+    if (!this.r.hl.build.length) { this.flash('Kein freies Felsfeld in Reichweite der Basis'); this.mode = 'idle'; return; }
+    this.flash(`${d.name}: grünes Feld antippen`);
+    // Auf schmalen Bildschirmen das Menü einklappen, damit die Felder frei liegen
+    if (!fromCard || window.innerWidth < 700) $('#panel').classList.remove('show');
+  }
+
   panelAction(a, t, e) {
     const g = this.g;
     if (this.busy && a !== 'close') return;
     if (a === 'close') { this.deselect(); return; }
     if (a === 'expand') { this.expanded = !this.expanded; this.showPanel(e); return; }
-    if (a === 'info') { const [kind, type] = t.split(':'); this.infoSel = { kind, type }; this.showInfo(kind, type, e); return; }
-    if (a === 'wait') { e.acted = true; e.moved = true; this.deselect(); this.refresh(); return; }
-    if (a === 'auto') { e.auto = !e.auto; this.showPanel(e); return; }
-    if (a === 'build') {
-      this.infoSel = null;
-      const d = BUILDINGS[t];
-      if (!g.bauhofReady(0) || !g.prereqOk(0, d) || g.players[0].credits < d.cost) { this.flash(g.players[0].credits < d.cost ? 'Zu wenig Credits' : 'Noch nicht verfügbar'); return; }
-      this.clearHL(); this.mode = 'build'; this.buildType = t;
-      this.r.hl.build = g.buildHexes(0, t);
-      if (!this.r.hl.build.length) { this.flash('Kein freies Felsfeld in Reichweite der Basis'); this.mode = 'idle'; return; }
-      this.flash(`${d.name}: grünes Feld antippen`);
-      $('#panel').classList.remove('show');
+    if (a === 'info') {
+      const [kind, type] = t.split(':'); this.infoSel = { kind, type }; this.showInfo(kind, type, e);
+      // Gebäude: Antippen der Karte startet direkt das Platzieren, ohne extra Bauen-Knopf
+      if (kind === 'bld') this.startBuild(type, true);
       return;
     }
+    if (a === 'wait') { e.acted = true; e.moved = true; this.deselect(); this.refresh(); return; }
+    if (a === 'auto') { e.auto = !e.auto; this.showPanel(e); return; }
+    if (a === 'build') { this.infoSel = null; this.startBuild(t, false); return; }
     if (a === 'prod') { this.infoSel = null; if (g.produce(e, t)) { this.flash(`${UNITS[t].name} in Auftrag gegeben`); this.refresh(); this.showPanel(e); } else this.flash('Produktion nicht möglich'); return; }
     if (a === 'cancelprod') { g.cancelProduce(e); this.refresh(); this.showPanel(e); return; }
     if (a === 'capture' || a === 'infiltrate') { this.mode = a; this.clearHL(); this.r.hl.sel = e; this.r.hl.target = g.adjBuildings(e, true).map((b) => [b.c, b.r]); this.flash('Feindliches Gebäude antippen'); return; }
